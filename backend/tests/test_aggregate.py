@@ -29,6 +29,50 @@ def test_timestamp_parsing_handles_zulu_and_long_fractions():
     assert aggregate.parse_ts(None) is None
 
 
+def test_timestamp_parsing_handles_every_fractional_precision():
+    """Postgres trims trailing zeros, so 3-5 fractional digits are routine.
+
+    Regression: an earlier normalisation scraped digits out of the string and ate
+    part of the UTC offset, so these lengths failed to parse. Callers then fell
+    back to the UTC date and mis-bucketed entries by up to a day — the AI coach
+    reported 0 kcal for a day that had food logged.
+    """
+    for digits in range(0, 10):
+        fraction = ("." + "1" * digits) if digits else ""
+        for offset in ("+00:00", "Z", "+05:30", "-07:00", ""):
+            raw = f"2026-08-27T19:32:32{fraction}{offset}"
+            assert aggregate.parse_ts(raw) is not None, raw
+
+
+def test_five_digit_fraction_buckets_into_the_correct_local_day():
+    # 19:32 UTC is 01:02 the next day in Asia/Kolkata — the exact case that broke.
+    tz = aggregate.resolve_tz("Asia/Kolkata")
+    row = {"logged_at": "2026-08-27T19:32:32.11579+00:00"}
+    assert aggregate.local_day_of(row, tz) == date(2026, 8, 28)
+
+    # And it must still land on the UTC day when the profile is on UTC.
+    assert aggregate.local_day_of(row, aggregate.resolve_tz("UTC")) == date(2026, 8, 27)
+
+
+def test_odd_precision_entries_reach_the_daily_series():
+    """daily_series feeds the forecast, so mis-parsing here skews projections."""
+    tz = aggregate.resolve_tz("Asia/Kolkata")
+    series = aggregate.daily_series(
+        food_rows=[
+            {"logged_at": "2026-08-27T19:32:32.11579+00:00", "calories": 263},
+            {"logged_at": "2026-08-27T05:10:00.123+00:00", "calories": 400},
+        ],
+        workout_rows=[],
+        tz=tz,
+        start=date(2026, 8, 27),
+        end=date(2026, 8, 28),
+    )
+    by_day = {d.day.isoformat(): d for d in series}
+    assert by_day["2026-08-28"].calories_in == 263  # 01:02 IST on the 28th
+    assert by_day["2026-08-27"].calories_in == 400  # 10:40 IST on the 27th
+    assert all(d.logged for d in series)
+
+
 def test_daily_series_zero_fills_missing_days():
     tz = aggregate.resolve_tz("UTC")
     series = aggregate.daily_series(

@@ -7,6 +7,7 @@ wrong is how trackers show an empty gauge at 1am or roll over mid-evening.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
@@ -30,22 +31,31 @@ def today_in_tz(tz: ZoneInfo) -> date:
 
 
 def parse_ts(raw: Any) -> datetime | None:
-    """Parse a PostgREST timestamptz into an aware datetime."""
+    """Parse a PostgREST timestamptz into an aware datetime.
+
+    ``datetime.fromisoformat`` handles every shape Postgres emits on Python 3.11+,
+    including any number of fractional digits and a 'Z' suffix, so it is tried
+    first. An earlier hand-rolled normalisation here scraped digits out of the
+    string and accidentally consumed part of the UTC offset, so timestamps with
+    3-5 fractional digits — which Postgres produces routinely, since it trims
+    trailing zeros — failed to parse. Callers then fell back to the *UTC* date and
+    mis-bucketed entries by up to a day.
+    """
     if isinstance(raw, datetime):
         return raw if raw.tzinfo else raw.replace(tzinfo=UTC)
     if not isinstance(raw, str) or not raw:
         return None
+
     text = raw.strip().replace("Z", "+00:00")
-    if "." in text:
-        head, _, tail = text.partition(".")
-        digits = "".join(ch for ch in tail if ch.isdigit())[:6]
-        rest = tail[len(digits) :] if len(tail) > len(digits) else ""
-        offset = "".join(ch for ch in rest if ch in "+-:0123456789")
-        text = f"{head}.{digits or '0'}{offset}"
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
-        return None
+        # Only trim fractional seconds longer than microsecond precision; never
+        # touch the offset.
+        try:
+            parsed = datetime.fromisoformat(re.sub(r"\.(\d{6})\d+", r".\1", text))
+        except ValueError:
+            return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
