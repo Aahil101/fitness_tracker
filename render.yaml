@@ -1,0 +1,41 @@
+# Render blueprint for the FastAPI backend.
+# Free web services sleep after ~15 minutes idle; the first request after that
+# takes a few seconds to wake. Fine for a private group, surprising if unexpected.
+services:
+  - type: web
+    name: fitness-tracker-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: '3.12.7'
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      # Set these in the Render dashboard — never commit real values.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: USDA_API_KEY
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      # Comma-separated. Add your Vercel production domain here.
+      - key: CORS_ORIGINS
+        sync: false

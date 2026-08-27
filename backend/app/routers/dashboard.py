@@ -8,7 +8,7 @@ of five, which matters on a phone on mobile data.
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
@@ -104,7 +104,10 @@ def _period_stats(
 
 @router.get("/dashboard")
 async def dashboard(
-    forecast_window: Literal[7, 14, 30] = Query(default=7),
+    # Accepts any window rather than a Literal: FastAPI hands query values over
+    # as strings, and Pydantic will not coerce "7" into Literal[7]. The UI
+    # exposes 7 / 14 / 30; the forecast maths is happy with anything in range.
+    forecast_window: int = Query(default=7, ge=3, le=90),
     ctx: UserContext = Depends(get_context),
 ) -> dict[str, Any]:
     year_food = await _fetch_year_food(ctx)
@@ -232,7 +235,7 @@ async def dashboard(
 @router.get("/analytics")
 async def analytics(
     days: int = Query(default=30, ge=7, le=365),
-    forecast_window: Literal[7, 14, 30] = Query(default=14),
+    forecast_window: int = Query(default=14, ge=3, le=90),
     ctx: UserContext = Depends(get_context),
 ) -> dict[str, Any]:
     """Series for the charts: weight + projection, calories in/out, macros."""
