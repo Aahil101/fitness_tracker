@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0"
+    />
+    <title>Pulse — AI Nutrition &amp; Fitness Tracker</title>
+    <meta
+      name="description"
+      content="Log food with a photo, watch your deficit in real time, and see exactly where your weight is heading."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Pulse" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FFFBFE" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141218" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <script>
+      // Resolve the theme before first paint so there is no white flash.
+      (function () {
+        try {
+          var stored = localStorage.getItem('pulse.theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var dark = stored ? stored === 'dark' : prefersDark;
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (_) {
+          /* private mode: fall back to the class already on <html> */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <div style="padding: 2rem; font-family: Roboto, system-ui, sans-serif">
+        Pulse needs JavaScript enabled to track your nutrition and workouts.
+      </div>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

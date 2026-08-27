@@ -1,0 +1,267 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Material You tonal palette derived from the #6750A4 purple seed.
+ * Values are RGB channels (not hex) so Tailwind can apply alpha modifiers,
+ * which is how the MD3 state-layer model is expressed throughout the app.
+ */
+@layer base {
+  :root {
+    /* Surfaces */
+    --md-surface: 255 251 254; /* #FFFBFE — warm off-white, never pure white */
+    --md-surface-dim: 222 216 225;
+    --md-surface-container-low: 231 224 236; /* #E7E0EC — inputs, recessed */
+    --md-surface-container: 243 237 247; /* #F3EDF7 — default card */
+    --md-surface-container-high: 236 230 240;
+    --md-surface-container-highest: 230 224 233;
+    --md-surface-variant: 231 224 236;
+
+    /* Content */
+    --md-on-surface: 28 27 31; /* #1C1B1F */
+    --md-on-surface-variant: 73 69 79; /* #49454F */
+
+    /* Primary */
+    --md-primary: 103 80 164; /* #6750A4 */
+    --md-on-primary: 255 255 255;
+    --md-primary-container: 234 221 255; /* #EADDFF */
+    --md-on-primary-container: 33 0 93;
+    --md-primary-fixed-dim: 208 188 255;
+
+    /* Secondary */
+    --md-secondary: 98 91 113;
+    --md-on-secondary: 255 255 255;
+    --md-secondary-container: 232 222 248; /* #E8DEF8 */
+    --md-on-secondary-container: 29 25 43;
+
+    /* Tertiary */
+    --md-tertiary: 125 82 96; /* #7D5260 */
+    --md-on-tertiary: 255 255 255;
+    --md-tertiary-container: 255 216 228;
+    --md-on-tertiary-container: 49 17 29;
+
+    /* Feedback */
+    --md-error: 179 38 30;
+    --md-on-error: 255 255 255;
+    --md-error-container: 249 222 220;
+    --md-on-error-container: 65 14 11;
+    --md-success: 30 121 82;
+    --md-success-container: 205 237 219;
+    --md-on-success-container: 3 47 30;
+    --md-warning: 158 106 15;
+    --md-warning-container: 252 231 199;
+    --md-on-warning-container: 62 40 2;
+
+    /* Outlines */
+    --md-outline: 121 116 126; /* #79747E */
+    --md-outline-variant: 202 196 208;
+
+    /* Inverse */
+    --md-inverse-surface: 49 48 51;
+    --md-inverse-on-surface: 244 239 244;
+
+    /*
+     * Gauge roles, named after the spec's colour X / Y / Z:
+     *   X = track (neutral ceiling), Y = filled progress, Z = goal marker.
+     * Teal reads as "measured" against the purple UI without competing with it.
+     */
+    --md-gauge-track: 202 196 208;
+    --md-gauge-fill: 0 150 167;
+    --md-gauge-marker: 255 110 90;
+
+    /* Chart roles */
+    --md-chart-in: 0 150 167;
+    --md-chart-out: 125 82 96;
+    --md-chart-protein: 103 80 164;
+    --md-chart-carbs: 0 150 167;
+    --md-chart-fat: 216 138 46;
+    --md-chart-fiber: 30 121 82;
+
+    color-scheme: light;
+  }
+
+  .dark {
+    --md-surface: 20 18 24; /* #141218 */
+    --md-surface-dim: 16 14 20;
+    --md-surface-container-low: 29 27 32;
+    --md-surface-container: 33 31 38;
+    --md-surface-container-high: 43 41 48;
+    --md-surface-container-highest: 54 52 59;
+    --md-surface-variant: 73 69 79;
+
+    --md-on-surface: 230 224 233;
+    --md-on-surface-variant: 202 196 208;
+
+    --md-primary: 208 188 255; /* #D0BCFF */
+    --md-on-primary: 56 30 114;
+    --md-primary-container: 79 55 139;
+    --md-on-primary-container: 234 221 255;
+    --md-primary-fixed-dim: 208 188 255;
+
+    --md-secondary: 204 194 220;
+    --md-on-secondary: 51 45 65;
+    --md-secondary-container: 74 68 88;
+    --md-on-secondary-container: 232 222 248;
+
+    --md-tertiary: 239 184 200;
+    --md-on-tertiary: 73 37 50;
+    --md-tertiary-container: 99 59 72;
+    --md-on-tertiary-container: 255 216 228;
+
+    --md-error: 242 184 181;
+    --md-on-error: 96 20 16;
+    --md-error-container: 140 29 24;
+    --md-on-error-container: 249 222 220;
+    --md-success: 118 216 168;
+    --md-success-container: 20 79 55;
+    --md-on-success-container: 190 236 213;
+    --md-warning: 240 189 116;
+    --md-warning-container: 92 62 6;
+    --md-on-warning-container: 252 231 199;
+
+    --md-outline: 147 143 153;
+    --md-outline-variant: 73 69 79;
+
+    --md-inverse-surface: 230 224 233;
+    --md-inverse-on-surface: 49 48 51;
+
+    --md-gauge-track: 73 69 79;
+    --md-gauge-fill: 77 208 225;
+    --md-gauge-marker: 255 138 120;
+
+    --md-chart-in: 77 208 225;
+    --md-chart-out: 239 184 200;
+    --md-chart-protein: 208 188 255;
+    --md-chart-carbs: 77 208 225;
+    --md-chart-fat: 240 189 116;
+    --md-chart-fiber: 118 216 168;
+
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-md-outline-variant;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-md-surface text-md-on-surface font-sans antialiased;
+    /* Safe areas so the bottom nav clears the iOS home indicator. */
+    padding-bottom: env(safe-area-inset-bottom);
+    overscroll-behavior-y: none;
+  }
+
+  /* Numbers in a tracker change constantly; stop them shifting the layout. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-md-primary ring-offset-2 ring-offset-md-surface;
+  }
+
+  ::selection {
+    @apply bg-md-primary/25;
+  }
+
+  /* Scrollbars styled to match the tonal surfaces. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-md-outline/30;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-md-outline/50;
+  }
+
+  /* Keep MD3's filled text field look on iOS/Safari. */
+  input,
+  select,
+  textarea {
+    @apply bg-transparent;
+    font-family: inherit;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@layer components {
+  /* The atmospheric layer: large organic blur shapes, positioned off-canvas. */
+  .md-blob {
+    @apply pointer-events-none absolute rounded-full blur-3xl;
+    mix-blend-mode: multiply;
+  }
+  .dark .md-blob {
+    mix-blend-mode: screen;
+  }
+
+  /* Organic squircle used behind hero art — rounded, with one tighter corner. */
+  .md-squircle {
+    border-radius: 100px 100px 100px 20px;
+  }
+
+  .md-glass {
+    @apply border border-white/15 bg-white/10 backdrop-blur-md;
+  }
+
+  /* Skeleton shimmer for loading states. */
+  .md-skeleton {
+    @apply relative overflow-hidden bg-md-surface-container-high;
+  }
+  .md-skeleton::after {
+    @apply absolute inset-0 animate-shimmer;
+    content: '';
+    background: linear-gradient(90deg, transparent, rgb(var(--md-surface) / 0.55), transparent);
+    transform: translateX(-100%);
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Horizontal chip rows that snap on touch. */
+  .snap-row {
+    scroll-snap-type: x mandatory;
+  }
+  .snap-row > * {
+    scroll-snap-align: start;
+  }
+}
+
+/*
+ * Respect vestibular sensitivity: drop movement, keep colour transitions so
+ * interactive feedback does not disappear entirely.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
