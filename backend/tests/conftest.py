@@ -8,8 +8,9 @@ contracts the frontend depends on — without credentials or network access.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,14 +21,24 @@ from app.security import CurrentUser
 
 USER_ID = "11111111-2222-3333-4444-555555555555"
 USER_TZ = "Asia/Kolkata"  # UTC+5:30 — a half-hour offset catches naive maths
-TODAY = date.today()
+TZ = ZoneInfo(USER_TZ)
+# "Today" from the profile's point of view, which is what the API buckets by.
+TODAY = datetime.now(TZ).date()
 
 
 def _iso(days_ago: int = 0, hour: int = 12) -> str:
-    moment = datetime.now(UTC).replace(
-        hour=hour, minute=0, second=0, microsecond=0
-    ) - timedelta(days=days_ago)
-    return moment.isoformat()
+    """UTC timestamp for a given *local* wall-clock hour, N local days back.
+
+    Anchoring on the local day matters: building these from the current UTC date
+    instead made the suite time-of-day dependent. With a UTC+5:30 profile, a
+    20:00 *UTC* entry falls at 01:30 the next local day, so the fixture spanned
+    11 local days instead of 10 whenever the tests ran after 18:30 UTC. Local
+    hours 8-20 never cross local midnight, so the span is now always exact.
+    """
+    local = datetime.combine(
+        TODAY - timedelta(days=days_ago), time(hour=hour), tzinfo=TZ
+    )
+    return local.astimezone(UTC).isoformat()
 
 
 PROFILE: dict[str, Any] = {
