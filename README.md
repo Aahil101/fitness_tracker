@@ -134,7 +134,26 @@ cd frontend && npm install && npm run dev
 
 ## Deployment
 
-### Frontend → Vercel
+### One command
+
+```bash
+export RENDER_API_KEY=...        # dashboard.render.com → Account Settings → API Keys
+vercel login                     # OAuth device flow, approve in the browser
+python3 scripts/deploy.py
+```
+
+That creates the Render service from the settings below, copies the backend
+environment up, deploys the frontend with `VITE_API_BASE_URL` pointing at the
+real Render URL, pins CORS to the Vercel origin, and points Supabase auth at it.
+Secrets are read from the gitignored `.env` files and never printed.
+
+Both credentials are one-time and unavoidable: Render's CLI cannot create
+services or manage environment variables (only the REST API can), and Vercel
+authenticates through an OAuth device flow that requires a human to approve.
+
+### Or step by step
+
+#### Frontend → Vercel
 
 Import the repo, set **Root Directory** to `frontend` (`vercel.json` covers the rest), and add:
 
@@ -145,7 +164,7 @@ VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_API_BASE_URL
 `VITE_API_BASE_URL` is your deployed API origin. Only `VITE_`-prefixed values reach the
 browser — never put the Gemini key or a service role key there.
 
-### Backend → Render or Railway
+#### Backend → Render or Railway
 
 - **Render** — "New Blueprint" picks up [`render.yaml`](render.yaml). Set the secret env vars in
   the dashboard. Free web services sleep after ~15 minutes idle, so the first request afterwards
@@ -157,7 +176,7 @@ browser — never put the Gemini key or a service role key there.
 Then set `CORS_ORIGINS` on the API to your Vercel domain. `*.vercel.app` preview URLs are
 already allowed by a regex, so previews work without extra configuration.
 
-### Supabase
+#### Supabase
 
 Add your production URL under Authentication → URL Configuration → Redirect URLs, otherwise
 email confirmation and Google OAuth will bounce back to localhost. Google sign-in also needs
