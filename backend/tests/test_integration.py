@@ -290,15 +290,19 @@ def test_input_validation_rejects_impossible_values(client: TestClient):
 
 
 # ---------------------------------------------------------------------------
-# AI degradation — the app must stay usable without Gemini configured
+# AI degradation — the app must stay usable without Gemini configured.
+# These pin the credential state via `no_ai_credentials` so they neither
+# depend on the developer's .env nor spend live API quota.
 # ---------------------------------------------------------------------------
-def test_ai_status_reports_missing_configuration(client: TestClient):
+def test_ai_status_reports_missing_configuration(client: TestClient, no_ai_credentials: None):
     body = client.get("/api/ai/status").json()
     assert body["gemini_configured"] is False
     assert body["model"]
 
 
-def test_photo_endpoint_explains_the_missing_key_instead_of_500ing(client: TestClient):
+def test_photo_endpoint_explains_the_missing_key_instead_of_500ing(
+    client: TestClient, no_ai_credentials: None
+):
     response = client.post(
         "/api/ai/food-photo", files={"file": ("meal.jpg", b"\xff\xd8\xff\xdb fake", "image/jpeg")}
     )
@@ -313,7 +317,9 @@ def test_photo_endpoint_rejects_non_images(client: TestClient):
     assert response.status_code in (400, 503)
 
 
-def test_insight_falls_back_to_rule_based_prose_with_real_numbers(client: TestClient):
+def test_insight_falls_back_to_rule_based_prose_with_real_numbers(
+    client: TestClient, no_ai_credentials: None
+):
     body = client.post("/api/ai/insight", json={"kind": "weekly", "refresh": True}).json()
     assert body["model"] is None  # no model was used
     assert len(body["body"]) > 40
@@ -322,7 +328,7 @@ def test_insight_falls_back_to_rule_based_prose_with_real_numbers(client: TestCl
     assert "1,900" in body["body"] or "1900" in body["body"]
 
 
-def test_chat_degrades_to_the_users_own_numbers(client: TestClient):
+def test_chat_degrades_to_the_users_own_numbers(client: TestClient, no_ai_credentials: None):
     body = client.post("/api/chat/messages", json={"content": "How am I doing?"}).json()
     assert body["degraded"] is True
     assert body["session_id"]

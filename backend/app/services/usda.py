@@ -8,6 +8,7 @@ persisted into the shared ``food_items`` table, which keeps us well inside the
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -22,7 +23,7 @@ log = logging.getLogger(__name__)
 SEARCH_TTL_S = 60 * 60 * 24
 DETAIL_TTL_S = 60 * 60 * 24 * 7
 
-# FoodData Central nutrient numbers.
+# FoodData Central nutrient IDs (the modern `nutrientId` field).
 NUTRIENT_ENERGY_KCAL = "1008"
 NUTRIENT_ENERGY_KJ = "1062"
 NUTRIENT_ATWATER_GENERAL = "2047"
@@ -32,7 +33,36 @@ NUTRIENT_CARBS = "1005"
 NUTRIENT_FAT = "1004"
 NUTRIENT_FIBER = "1079"
 
-PREFERRED_DATA_TYPES = ("Foundation", "SR Legacy", "Survey (FNDDS)", "Branded")
+# The /foods/search endpoint reports *both* the modern id and the legacy INFOODS
+# tagnumber, and confusingly names the latter `nutrientNumber`:
+#     {"nutrientId": 1008, "nutrientNumber": "208", "nutrientName": "Energy"}
+# Reading `nutrientNumber` and comparing it to "1008" therefore never matches,
+# which silently dropped every search result for want of a calorie value. Both
+# spellings are now resolved to the id above.
+LEGACY_NUMBER_TO_ID: dict[str, str] = {
+    "208": NUTRIENT_ENERGY_KCAL,
+    "268": NUTRIENT_ENERGY_KJ,
+    "957": NUTRIENT_ATWATER_GENERAL,
+    "958": NUTRIENT_ATWATER_SPECIFIC,
+    "203": NUTRIENT_PROTEIN,
+    "205": NUTRIENT_CARBS,
+    "204": NUTRIENT_FAT,
+    "291": NUTRIENT_FIBER,
+}
+
+# Datasets searched, in preference order. "Survey (FNDDS)" is deliberately
+# absent: its encoded space and parentheses (Survey+%28FNDDS%29) make the FDC
+# edge proxy reject the request with an HTML 400 about two thirds of the time,
+# and it fails in runs — measured 2/6 successes with it versus 6/6 without,
+# including four consecutive failures. Foundation and SR Legacy already cover
+# generic whole foods, so dropping it is a cheap trade for a reliable search.
+PREFERRED_DATA_TYPES = ("Foundation", "SR Legacy", "Branded")
+
+# nginx in front of the FDC API intermittently rejects a request that succeeds
+# moments later with the same URL, so one retry is worth it. Genuine API
+# validation errors come back as JSON and are not retried.
+RETRY_STATUSES = frozenset({400, 500, 502, 503, 504})
+RETRY_DELAY_S = 0.6
 
 
 def _as_float(value: Any) -> float | None:
@@ -44,23 +74,41 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _nutrient_key(entry: dict[str, Any]) -> str | None:
+    """Canonical nutrient id for one foodNutrients entry, whatever its shape.
+
+    Handles all three payload shapes FDC uses: search results (flat, with
+    ``nutrientId``), abridged detail (flat), and full detail (nested under
+    ``nutrient``). Falls back to translating the legacy tagnumber.
+    """
+    nested = entry.get("nutrient") or {}
+
+    identifier = entry.get("nutrientId") or nested.get("id")
+    if identifier is not None:
+        return str(identifier)
+
+    legacy = entry.get("nutrientNumber") or entry.get("number") or nested.get("number")
+    if legacy is None:
+        return None
+    legacy = str(legacy)
+    # A four-digit "number" is already an id in some payloads; pass it through.
+    return LEGACY_NUMBER_TO_ID.get(legacy, legacy)
+
+
 def _nutrient_map(food: dict[str, Any]) -> dict[str, float]:
-    """Collect nutrientNumber -> value from either search or detail payloads."""
+    """Collect canonical nutrient id -> value from any FDC payload shape."""
     values: dict[str, float] = {}
     for entry in food.get("foodNutrients") or []:
-        number = str(
-            entry.get("nutrientNumber")
-            or entry.get("number")
-            or (entry.get("nutrient") or {}).get("number")
-            or ""
-        )
+        if not isinstance(entry, dict):
+            continue
+        key = _nutrient_key(entry)
         amount = _as_float(
             entry.get("value")
             if entry.get("value") is not None
             else entry.get("amount")
         )
-        if number and amount is not None and number not in values:
-            values[number] = amount
+        if key and amount is not None and key not in values:
+            values[key] = amount
     return values
 
 
@@ -103,25 +151,40 @@ def _round(value: float | None) -> float | None:
 
 async def _get(path: str, params: dict[str, Any]) -> Any | None:
     client = get_http_client()
-    try:
-        resp = await client.get(
-            f"{settings.usda_api_base}{path}",
-            params={**params, "api_key": settings.usda_api_key},
-        )
-    except httpx.HTTPError as exc:
-        log.warning("USDA request failed: %s", exc)
+    url = f"{settings.usda_api_base}{path}"
+    query = {**params, "api_key": settings.usda_api_key}
+
+    for attempt in range(2):
+        try:
+            resp = await client.get(url, params=query)
+        except httpx.HTTPError as exc:
+            log.warning("USDA request failed: %s", exc)
+            return None
+
+        if resp.status_code < 400:
+            try:
+                return resp.json()
+            except ValueError:
+                log.warning("USDA returned a non-JSON success body")
+                return None
+
+        if resp.status_code == 429:
+            log.warning("USDA rate limit hit")
+            return None
+
+        # An HTML body means the edge proxy rejected it, not the API — those are
+        # transient. A JSON body is a real validation error; retrying is futile.
+        body = resp.text[:200]
+        transient = resp.status_code in RETRY_STATUSES and not body.lstrip().startswith("{")
+        if transient and attempt == 0:
+            log.info("USDA %s looks transient, retrying once", resp.status_code)
+            await asyncio.sleep(RETRY_DELAY_S)
+            continue
+
+        log.warning("USDA error %s: %s", resp.status_code, body)
         return None
 
-    if resp.status_code == 429:
-        log.warning("USDA rate limit hit")
-        return None
-    if resp.status_code >= 400:
-        log.warning("USDA error %s: %s", resp.status_code, resp.text[:200])
-        return None
-    try:
-        return resp.json()
-    except ValueError:
-        return None
+    return None
 
 
 async def search_foods(query: str, page_size: int = 20) -> list[dict[str, Any]]:

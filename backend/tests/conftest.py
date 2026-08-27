@@ -188,6 +188,20 @@ class FakeREST:
 
 
 @pytest.fixture
+def no_ai_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the AI-unconfigured state for degradation tests.
+
+    Without this the tests inherit whatever is in backend/.env: on a machine
+    with a real GEMINI_API_KEY they would assert the wrong branch *and* spend
+    live quota on every run. Degradation is a behaviour we choose to test, so
+    the configuration is set explicitly rather than inherited.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "gemini_api_key", "")
+
+
+@pytest.fixture
 def anon_client() -> Iterator[TestClient]:
     with TestClient(app) as client:
         yield client
