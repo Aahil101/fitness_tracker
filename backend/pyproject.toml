@@ -1,0 +1,19 @@
+[project]
+name = "fitness-tracker-api"
+version = "1.0.0"
+description = "FastAPI backend for the AI nutrition & fitness tracker"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+ignore = ["B008", "E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]
