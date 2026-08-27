@@ -5,6 +5,7 @@ dist-ssr/
 .vite/
 *.local
 frontend/dev-dist/
+frontend/dist-preview/
 frontend/stats.html
 
 # --- Python / backend ---

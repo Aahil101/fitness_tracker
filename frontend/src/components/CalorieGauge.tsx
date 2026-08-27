@@ -87,7 +87,12 @@ export function CalorieGauge({
   className,
   animate = true,
 }: CalorieGaugeProps) {
+  // The arc spans 0 -> maintenance, per spec. A surplus goal (bulking) would
+  // otherwise pin the marker at the end and misreport where the target sits, so
+  // the scale extends to whichever is larger.
+  const scaleMax = Math.max(1, maintenance, target);
   const safeMaintenance = Math.max(1, maintenance);
+  const maintenanceBelowMax = scaleMax > safeMaintenance;
 
   const {
     fillFraction,
@@ -96,13 +101,17 @@ export function CalorieGauge({
     overMaintenance,
     remaining,
     markerLine,
+    maintenanceTick,
     fillEnd,
   } = useMemo(() => {
-    const fill = Math.max(0, Math.min(1, logged / safeMaintenance));
-    const goal = Math.max(0, Math.min(1, target / safeMaintenance));
+    const fill = Math.max(0, Math.min(1, logged / scaleMax));
+    const goal = Math.max(0, Math.min(1, target / scaleMax));
     const markerAngle = angleAt(goal);
     const inner = polar(R - STROKE / 2 - 5, markerAngle);
     const outer = polar(R + STROKE / 2 + 5, markerAngle);
+
+    // Only drawn when the scale had to stretch past maintenance.
+    const maintenanceAngle = angleAt(safeMaintenance / scaleMax);
 
     return {
       fillFraction: fill,
@@ -111,22 +120,25 @@ export function CalorieGauge({
       overMaintenance: logged > safeMaintenance,
       remaining: target - logged,
       markerLine: { inner, outer, angle: markerAngle },
+      maintenanceTick: {
+        inner: polar(R - STROKE / 2, maintenanceAngle),
+        outer: polar(R + STROKE / 2, maintenanceAngle),
+      },
       fillEnd: polar(R, angleAt(fill)),
     };
-  }, [logged, safeMaintenance, target]);
+  }, [logged, safeMaintenance, scaleMax, target]);
 
-  // Colour state: teal while under the goal, amber past it, error past maintenance.
-  const fillColor = overMaintenance
-    ? 'stroke-md-error'
-    : overTarget
-      ? 'stroke-md-warning'
-      : 'stroke-md-gauge';
+  /*
+   * Colour state: teal under the goal, amber past it, error past maintenance.
+   * The error step only applies to a deficit goal — for a surplus (bulking)
+   * target, eating above maintenance is the plan working, not a problem.
+   */
+  const isSurplusGoal = target >= safeMaintenance;
+  const state = overMaintenance && !isSurplusGoal ? 'error' : overTarget ? 'warn' : 'ok';
 
-  const knobColor = overMaintenance
-    ? 'fill-md-error'
-    : overTarget
-      ? 'fill-md-warning'
-      : 'fill-md-gauge';
+  const fillColor = { error: 'stroke-md-error', warn: 'stroke-md-warning', ok: 'stroke-md-gauge' }[state];
+  const knobColor = { error: 'fill-md-error', warn: 'fill-md-warning', ok: 'fill-md-gauge' }[state];
+  const numberColor = { error: 'text-md-error', warn: 'text-md-warning', ok: 'text-md-on-surface' }[state];
 
   const summary = `${kcal(logged)} calories logged of ${kcal(
     safeMaintenance,
@@ -144,11 +156,11 @@ export function CalorieGauge({
           ORIENTATION === 'flat-top' ? 'mb-1 order-first' : 'mt-1 order-last',
         )}
       >
-        <span>{ZERO_ON_LEFT ? '0' : kcal(safeMaintenance)}</span>
+        <span>{ZERO_ON_LEFT ? '0' : kcal(scaleMax)}</span>
         <span className="text-[11px] uppercase tracking-wider text-md-on-surface-variant/70">
-          maintenance scale
+          {maintenanceBelowMax ? 'goal scale' : 'maintenance scale'}
         </span>
-        <span>{ZERO_ON_LEFT ? kcal(safeMaintenance) : '0'}</span>
+        <span>{ZERO_ON_LEFT ? kcal(scaleMax) : '0'}</span>
       </div>
 
       <div className="relative w-full">
@@ -235,6 +247,19 @@ export function CalorieGauge({
             </g>
           )}
 
+          {/* Maintenance reference, only when the scale runs past it. */}
+          {maintenanceBelowMax && (
+            <line
+              x1={maintenanceTick.inner.x}
+              y1={maintenanceTick.inner.y}
+              x2={maintenanceTick.outer.x}
+              y2={maintenanceTick.outer.y}
+              className="stroke-md-on-surface-variant"
+              strokeWidth={2.5}
+              strokeLinecap="round"
+            />
+          )}
+
           {/* Layer 3 — goal marker: a tick, never a fill, so it cannot be mistaken
               for progress. */}
           <line
@@ -266,11 +291,7 @@ export function CalorieGauge({
           <span
             className={cn(
               'tabular text-display-md font-medium leading-none tracking-tight transition-colors duration-medium',
-              overMaintenance
-                ? 'text-md-error'
-                : overTarget
-                  ? 'text-md-warning'
-                  : 'text-md-on-surface',
+              numberColor,
             )}
           >
             {kcal(logged)}
@@ -285,6 +306,7 @@ export function CalorieGauge({
       <p className="mt-1 text-center text-label-md text-md-on-surface-variant">
         of <span className="tabular">{kcal(safeMaintenance)}</span> maintenance · goal{' '}
         <span className="tabular font-medium text-md-gauge-marker">{kcal(target)}</span>
+        {maintenanceBelowMax && <span className="ml-1">(surplus)</span>}
       </p>
 
       {/* Percentages of the scale, for readers who want the raw geometry. */}

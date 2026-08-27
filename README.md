@@ -239,10 +239,26 @@ for querying. Getting this wrong is how trackers show an empty gauge at 1 a.m.
 ## Tests
 
 ```bash
-make test    # backend: 45 unit tests over the energy, forecast, MET,
-             # aggregation and API-surface layers — no credentials needed
+make test    # backend: 74 tests over the energy, forecast, MET, aggregation,
+             # API-surface and integration layers — no credentials needed
 make lint    # ruff, eslint, tsc
 make build   # production frontend build
 ```
 
+The integration suite mounts the real app against a fake PostgREST layer, so it
+covers dependency wiring, the auth boundary on every user-scoped route, the exact
+query strings the handlers build (including timezone-converted day boundaries),
+the dashboard response contract, and the AI degradation paths.
+
 CI runs all of it on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
+### Visual QA harness
+
+```bash
+cd frontend && npm run preview:ui   # then open /preview.html
+```
+
+Renders the real `HomeGauge`, all six gauge colour states and the MD3 primitives
+against fixture data, so layouts can be reviewed at any viewport without a
+Supabase session. It is only built when `BUILD_PREVIEW=1`, so it never ships to
+production.

@@ -1,0 +1,29 @@
+<!doctype html>
+<!--
+  Visual QA harness. Renders the real components against fixture data so the
+  layout can be screenshotted at phone and desktop widths without a live
+  Supabase session. Not part of the shipped app: excluded from the production
+  build in vite.config.ts and safe to delete.
+-->
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Pulse — visual QA</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // ?theme=light|dark, defaults to light so both palettes can be captured.
+      const params = new URLSearchParams(location.search);
+      document.documentElement.classList.toggle('dark', params.get('theme') === 'dark');
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/preview.tsx"></script>
+  </body>
+</html>

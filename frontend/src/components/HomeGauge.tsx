@@ -98,12 +98,12 @@ export function HomeGauge({
             )}
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-3 xs:flex-row">
             <Button
               size="lg"
               icon={<Camera size={20} />}
               onClick={onLogFood}
-              className="flex-1 sm:flex-none"
+              className="flex-1 whitespace-nowrap px-5 sm:flex-none sm:px-8"
             >
               Log food
             </Button>
@@ -112,7 +112,7 @@ export function HomeGauge({
               variant="tonal"
               icon={<Scale size={20} />}
               onClick={onLogWeight}
-              className="flex-1 sm:flex-none"
+              className="flex-1 whitespace-nowrap px-5 sm:flex-none sm:px-8"
             >
               {weight.logged_today ? 'Update weight' : 'Log weight'}
             </Button>
@@ -160,24 +160,19 @@ export function HomeGauge({
               calories {PERIOD_PHRASE[period]}.
             </p>
 
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-label-md text-md-on-surface-variant">
-              <span className="tabular">
-                {kcal(stats.daily_average)} kcal/day average
-              </span>
-              <span aria-hidden className="text-md-outline-variant">
-                ·
-              </span>
-              <span className="tabular">
-                {stats.days_logged} of {stats.days} days logged
-              </span>
-            </div>
-
-            {stats.workout_sessions > 0 && (
-              <p className="mt-2 text-label-md text-md-on-surface-variant">
-                <span className="tabular">{stats.workout_sessions}</span> workouts ·{' '}
-                <span className="tabular">{kcal(stats.total_burned)}</span> kcal burned
-              </p>
-            )}
+            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-label-md">
+              <StatPair label="Daily average" value={`${kcal(stats.daily_average)} kcal`} />
+              <StatPair label="Days logged" value={`${stats.days_logged} of ${stats.days}`} />
+              <StatPair label="Protein" value={`${Math.round(stats.protein_g)} g`} />
+              <StatPair
+                label="Workouts"
+                value={
+                  stats.workout_sessions > 0
+                    ? `${stats.workout_sessions} · ${kcal(stats.total_burned)} kcal`
+                    : 'none logged'
+                }
+              />
+            </dl>
           </div>
 
           {/* -- 4.3 Live weight trend --------------------------------- */}
@@ -299,6 +294,15 @@ function TrendIcon({ direction }: { direction: 'lose' | 'gain' | 'hold' }) {
   if (direction === 'lose') return <TrendingDown className={cn(shared, 'text-md-success')} />;
   if (direction === 'gain') return <TrendingUp className={cn(shared, 'text-md-warning')} />;
   return <Minus className={cn(shared, 'text-md-on-surface-variant')} />;
+}
+
+function StatPair({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-label-sm text-md-on-surface-variant">{label}</dt>
+      <dd className="tabular mt-0.5 font-medium text-md-on-surface">{value}</dd>
+    </div>
+  );
 }
 
 function MiniStat({ label, value }: { label: string; value: string }) {

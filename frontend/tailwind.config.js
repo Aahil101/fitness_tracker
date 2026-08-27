@@ -197,7 +197,8 @@ export default {
       },
 
       screens: {
-        xs: '400px',
+        // Below this the two primary action buttons stack instead of overflowing.
+        xs: '380px',
       },
     },
   },

@@ -4,6 +4,12 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+/**
+ * The visual QA harness (preview.html + src/preview.tsx) is only built when
+ * BUILD_PREVIEW=1, so it never ships to production.
+ */
+const includePreview = process.env.BUILD_PREVIEW === '1';
+
 export default defineConfig({
   plugins: [
     react(),
@@ -76,6 +82,12 @@ export default defineConfig({
     sourcemap: false,
     chunkSizeWarningLimit: 900,
     rollupOptions: {
+      input: includePreview
+        ? {
+            main: fileURLToPath(new URL('./index.html', import.meta.url)),
+            preview: fileURLToPath(new URL('./preview.html', import.meta.url)),
+          }
+        : fileURLToPath(new URL('./index.html', import.meta.url)),
       output: {
         // Split the heavy, rarely-changing libraries so the app shell stays small.
         manualChunks: {
