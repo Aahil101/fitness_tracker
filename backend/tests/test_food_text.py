@@ -235,3 +235,75 @@ def test_no_usda_match_and_no_estimate_still_asks_for_manual_entry(client, stub_
     assert item["resolution"] == "unresolved"
     assert item["calories"] is None
     assert "manually" in (item["notes"] or "")
+
+
+
+def test_mixed_batch_sends_identical_keys_to_postgrest(client):
+    """Saving a USDA item beside an AI estimate must not trip PGRST102.
+
+    PostgREST requires every object in a bulk insert to carry the same keys and
+    answers "All object keys must match" otherwise. The row builder drops null
+    fields and only sets food_item_id when known, so a real meal — pongal
+    estimated, ghee matched — produced two different shapes and the save failed
+    with a 400 the user could do nothing about.
+    """
+    payload = [
+        {   # AI estimate: no fibre, no food_item_id, no fdc_id
+            "food_name": "pongal",
+            "portion_g": 150.0,
+            "calories": 195.0,
+            "protein_g": 5.3,
+            "carbs_g": 27.0,
+            "fat_g": 6.8,
+            "meal_type": "breakfast",
+            "source": "ai_confirmed",
+            "ai_confidence": 0.7,
+        },
+        {   # USDA match: fibre present, and an image to widen the key set further
+            "food_name": "ghee",
+            "portion_g": 5.0,
+            "calories": 45.0,
+            "protein_g": 0.0,
+            "carbs_g": 0.0,
+            "fat_g": 5.0,
+            "fiber_g": 0.0,
+            "meal_type": "breakfast",
+            "source": "ai_confirmed",
+            "ai_confidence": 0.9,
+            "image_url": "https://example.test/meal.jpg",
+        },
+    ]
+
+    resp = client.post("/api/food/logs/batch", json=payload)
+    assert resp.status_code == 201, resp.text
+
+    # The fake layer echoes back exactly the rows it was handed, so the response
+    # shows the shape PostgREST would have received.
+    rows = resp.json()["logs"]
+    assert len(rows) == 2
+
+    key_sets = [frozenset(row.keys()) - {"id"} for row in rows]
+    assert key_sets[0] == key_sets[1], (
+        f"objects differ, PostgREST would reject this: "
+        f"{sorted(key_sets[0] ^ key_sets[1])}"
+    )
+    # padding must be null rather than invented values
+    by_name = {row["food_name"]: row for row in rows}
+    assert by_name["pongal"]["fiber_g"] is None
+    assert by_name["pongal"]["image_url"] is None
+    assert by_name["ghee"]["fiber_g"] == 0.0
+    # and the real values must survive the padding
+    assert by_name["pongal"]["calories"] == 195.0
+    assert by_name["ghee"]["image_url"] == "https://example.test/meal.jpg"
+
+
+def test_a_single_entry_batch_is_left_alone(client):
+    """One row cannot mismatch, so it must not be padded with empty columns."""
+    resp = client.post("/api/food/logs/batch", json=[{
+        "food_name": "pongal", "portion_g": 150.0, "calories": 195.0,
+        "meal_type": "breakfast", "source": "ai_confirmed",
+    }])
+    assert resp.status_code == 201, resp.text
+
+    row = resp.json()["logs"][0]
+    assert "fiber_g" not in row, "a lone row should keep its compact shape"

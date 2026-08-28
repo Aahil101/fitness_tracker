@@ -169,6 +169,17 @@ async def create_food_logs_batch(
         row.setdefault("meal_type", default_meal)
         rows.append(row)
 
+    # PostgREST rejects a bulk insert whose objects have differing key sets with
+    # PGRST102 "All object keys must match". exclude_none drops keys per row and
+    # food_item_id is only set when known, so a mixed batch produced mismatched
+    # shapes — a USDA item carrying fibre and a food_item_id next to an AI
+    # estimate carrying neither. Padding to the union of keys keeps every object
+    # identical; the added values are null, which is what the columns already
+    # hold when omitted.
+    if len(rows) > 1:
+        columns = sorted(set().union(*(row.keys() for row in rows)))
+        rows = [{column: row.get(column) for column in columns} for row in rows]
+
     created = await ctx.db.insert("food_logs", rows)
     return {"logs": created, "count": len(created)}
 
