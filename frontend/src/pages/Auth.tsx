@@ -18,6 +18,12 @@ import { useState, type FormEvent } from 'react';
 
 import { Blobs, Button, IconButton, TextField, useToast } from '@/components/md';
 import { useAuth } from '@/hooks/authContext';
+import {
+  isRememberMeEnabled,
+  rememberedEmail,
+  rememberEmail,
+  setRememberMe as persistRememberMe,
+} from '@/lib/supabase';
 import { useTheme } from '@/hooks/useTheme';
 import { cn } from '@/lib/cn';
 
@@ -65,12 +71,13 @@ export function AuthPage() {
 
   const [mode, setMode] = useState<Mode>('signin');
   const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => rememberedEmail());
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const [rememberMe, setRememberMe] = useState(() => isRememberMeEnabled());
 
   const passwordChecks = PASSWORD_RULES.map((rule) => ({
     ...rule,
@@ -93,6 +100,9 @@ export function AuthPage() {
 
     setBusy(true);
     try {
+      // Written before the call: Supabase persists the new session immediately,
+      // so the preference has to be in place first.
+      persistRememberMe(rememberMe);
       if (mode === 'reset') {
         await sendPasswordReset(email);
         setSentTo(email);
@@ -105,6 +115,7 @@ export function AuthPage() {
         }
       } else {
         await signIn(email, password);
+        rememberEmail(email.trim());
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Something went wrong.');
@@ -332,18 +343,33 @@ export function AuthPage() {
                   </div>
                 )}
 
-                {mode === 'signin' && (
-                  <div className="flex justify-end">
-                    <Button
-                      variant="text"
-                      size="sm"
-                      onClick={() => {
-                        setMode('reset');
-                        setError(null);
-                      }}
-                    >
-                      Forgot password?
-                    </Button>
+                {mode !== 'reset' && (
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="flex cursor-pointer select-none items-center gap-2.5 text-label-md text-md-on-surface-variant">
+                      <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(event) => {
+                          setRememberMe(event.target.checked);
+                          persistRememberMe(event.target.checked);
+                        }}
+                        className="h-4 w-4 rounded-sm border-md-outline text-md-primary accent-md-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-md-primary"
+                      />
+                      Keep me signed in
+                    </label>
+
+                    {mode === 'signin' && (
+                      <Button
+                        variant="text"
+                        size="sm"
+                        onClick={() => {
+                          setMode('reset');
+                          setError(null);
+                        }}
+                      >
+                        Forgot password?
+                      </Button>
+                    )}
                   </div>
                 )}
 
