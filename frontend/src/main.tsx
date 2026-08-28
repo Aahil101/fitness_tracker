@@ -29,6 +29,32 @@ const queryClient = new QueryClient({
   },
 });
 
+/**
+ * Pick up a new deployment without a manual hard refresh.
+ *
+ * The generated service worker uses skipWaiting + clientsClaim, so a new version
+ * activates and claims open pages straight away — but a page already loaded keeps
+ * the assets it fetched, leaving the user on the previous build until they reload
+ * by hand. That stranded a shipped feature behind a cached shell.
+ *
+ * `controllerchange` fires exactly when the new worker takes over, which is the
+ * right moment to reload. The flag guards against a reload loop.
+ */
+function reloadOnServiceWorkerUpdate(): void {
+  if (!('serviceWorker' in navigator)) return;
+  // A page with no controller yet is a first install, not an update; reloading
+  // then would interrupt the very first visit for nothing.
+  const wasControlled = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!wasControlled || reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
+}
+
+reloadOnServiceWorkerUpdate();
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
