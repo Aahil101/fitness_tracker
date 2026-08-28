@@ -206,10 +206,15 @@ def no_ai_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     with a real GEMINI_API_KEY they would assert the wrong branch *and* spend
     live quota on every run. Degradation is a behaviour we choose to test, so
     the configuration is set explicitly rather than inherited.
+
+    Both providers are cleared. Leaving Groq configured would send the request
+    down the fallback path instead of degrading, which is the opposite of what
+    these tests exist to check.
     """
     from app.config import settings
 
     monkeypatch.setattr(settings, "gemini_api_key", "")
+    monkeypatch.setattr(settings, "groq_api_key", "")
 
 
 @pytest.fixture

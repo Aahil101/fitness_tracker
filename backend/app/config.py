@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # full day's log routinely runs past the 30s that suits Supabase and USDA,
     # and exceeding it made the chat fall back to the offline reply.
     gemini_timeout_s: float = Field(default=90.0, alias="GEMINI_TIMEOUT_S")
+    # Groq backs the text-only AI paths when Gemini's daily free-tier allowance
+    # runs out. No vision models are published, so photos stay on Gemini.
+    groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
+    groq_api_base: str = Field(default="https://api.groq.com/openai/v1", alias="GROQ_API_BASE")
+    groq_model: str = Field(default="openai/gpt-oss-120b", alias="GROQ_MODEL")
     max_upload_bytes: int = Field(default=8 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
 
     @field_validator("supabase_url", "gemini_api_base", "usda_api_base", "upstash_redis_rest_url")
@@ -75,6 +80,10 @@ class Settings(BaseSettings):
     @property
     def gemini_configured(self) -> bool:
         return bool(self.gemini_api_key)
+
+    @property
+    def groq_configured(self) -> bool:
+        return bool(self.groq_api_key)
 
     @property
     def redis_configured(self) -> bool:

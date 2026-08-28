@@ -21,7 +21,7 @@ from ..schemas import (
     InsightRequest,
     RecognisedFood,
 )
-from ..services import aggregate, gemini, insights, usda
+from ..services import aggregate, gemini, insights, text_ai, usda
 from ..services.forecast import forecast as run_forecast
 from .food import ensure_food_item
 
@@ -234,7 +234,7 @@ async def food_text(
             retry_after=limit.reset_in_s,
         )
 
-    parsed = await gemini.parse_meal_text(payload.text)
+    parsed, provider = await text_ai.parse_meal_text(payload.text)
 
     raw_items = parsed.get("items") or []
     if not isinstance(raw_items, list):
@@ -261,7 +261,7 @@ async def food_text(
     return FoodPhotoDraft(
         items=items,
         image_url=None,
-        model=settings.gemini_model,
+        model=provider,
         meal_type=meal_type,
         total_calories=round(sum(i.calories or 0 for i in items), 1),
         warnings=warnings,

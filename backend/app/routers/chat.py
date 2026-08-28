@@ -25,7 +25,7 @@ from ..db import eq
 from ..deps import UserContext, fetch_food_logs, fetch_weight_logs, fetch_workouts, get_context
 from ..errors import AppError, NotFoundError, RateLimitError
 from ..schemas import ChatMessageCreate, ChatMessageOut, ChatReply, ChatSessionCreate
-from ..services import aggregate, gemini
+from ..services import aggregate, text_ai
 from ..services.forecast import forecast as run_forecast
 
 log = logging.getLogger(__name__)
@@ -281,8 +281,9 @@ async def send_message(
     )
 
     degraded = False
+    provider: str | None = None
     try:
-        reply_text = await gemini.chat(
+        reply_text, provider = await text_ai.chat(
             history, context_json=json.dumps(context, default=str, separators=(",", ":"))
         )
     except AppError as exc:
@@ -304,7 +305,7 @@ async def send_message(
             "role": "assistant",
             "content": reply_text,
             "context_snapshot": context,
-            "model": None if degraded else settings.gemini_model,
+            "model": None if degraded else provider,
         },
     )
 
