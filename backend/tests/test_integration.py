@@ -434,3 +434,37 @@ class TestMeasuredMetrics:
         assert body["weight_trend"]["how_calculated"]
         assert body["expenditure"]["how_calculated"]
         assert body["adherence"]["how_calculated"]
+
+
+
+class TestAdherenceExcludesToday:
+    """A half-finished day is not a failed day.
+
+    The fixture logs three meals a day including today, but at any hour before
+    the last meal today's total is necessarily below target. Grading it would
+    mark the user off-plan for not having eaten dinner yet.
+    """
+
+    def test_today_is_not_graded(self, client: TestClient):
+        from datetime import date as _date
+        from datetime import timedelta as _timedelta
+
+        body = client.get("/api/dashboard").json()
+        adherence = body["adherence"]
+        today = _date.fromisoformat(body["today"]["date"])
+
+        # The window ends yesterday, so it can never include today.
+        assert adherence["days_in_window"] == 14
+        analytics = client.get("/api/analytics").json()
+        assert analytics["adherence"]["days_in_window"] <= 14
+
+        # And the day count cannot exceed the days that have actually finished.
+        assert adherence["days_logged"] <= 14
+        assert today - _timedelta(days=1) <= today  # sanity on the fixture clock
+
+    def test_dashboard_and_analytics_agree_on_adherence(self, client: TestClient):
+        """Two surfaces, one number — a user comparing them must not find a gap."""
+        dash = client.get("/api/dashboard").json()["adherence"]
+        analytics = client.get("/api/analytics").json()["adherence"]
+        assert dash["days_compliant"] == analytics["days_compliant"]
+        assert dash["days_logged"] == analytics["days_logged"]

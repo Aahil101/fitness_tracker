@@ -224,12 +224,16 @@ async def dashboard(
         today=ctx.today,
     )
 
+    # Today is deliberately excluded. At 11am a user has logged breakfast and
+    # nothing else, so grading today against a full day's target marks them
+    # "under target" for the crime of not having eaten lunch yet — and a metric
+    # that calls you off-plan before noon is one you learn to ignore.
     adherence_state = adherence.assess(
         macro_days=aggregate.macro_daily_series(
             food_rows=year_food,
             tz=ctx.tz,
-            start=ctx.today - timedelta(days=ADHERENCE_WINDOW_DAYS - 1),
-            end=ctx.today,
+            start=ctx.today - timedelta(days=ADHERENCE_WINDOW_DAYS),
+            end=ctx.today - timedelta(days=1),
         ),
         calorie_target=target,
         protein_target_g=ctx.goal.get("protein_target_g"),
@@ -470,7 +474,10 @@ async def analytics(
         "weight_trend": trend_state.to_dict(),
         "expenditure": expenditure_block,
         "adherence": adherence.assess(
-            macro_days=macro_series[-ADHERENCE_WINDOW_DAYS:],
+            # Excluding today, for the same reason as the dashboard.
+            macro_days=[m for m in macro_series if m["date"] != ctx.today.isoformat()][
+                -ADHERENCE_WINDOW_DAYS:
+            ],
             calorie_target=target,
             protein_target_g=ctx.goal.get("protein_target_g"),
         ).to_dict(),
