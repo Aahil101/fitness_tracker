@@ -38,6 +38,9 @@ TEA_AND_SUGAR: dict[str, Any] = {
 USDA_MATCHES = {
     "tea": {"fdc_id": "1", "name": "Tea", "calories_per_100g": 34.0, "protein_g": 0.1},
     "sugar": {"fdc_id": "2", "name": "Sugar, granulated", "calories_per_100g": 400.0},
+    # Ghee is in USDA even though pongal is not, which is what makes the mixed
+    # South Indian meal a good test of database-vs-estimate precedence.
+    "ghee": {"fdc_id": "3", "name": "Ghee", "calories_per_100g": 900.0},
 }
 
 
@@ -138,3 +141,97 @@ def test_blank_and_overlong_text_are_rejected_before_reaching_the_model(client, 
     assert client.post("/api/ai/food-text", json={"text": " "}).status_code == 422
     assert client.post("/api/ai/food-text", json={"text": "x" * 1001}).status_code == 422
     assert seen["prompts"] == [], "validation must not spend model quota"
+
+
+
+# A South Indian breakfast: USDA carries ghee and egg but not pongal, which is
+# the common case for regional and homemade dishes.
+PONGAL_MEAL: dict[str, Any] = {
+    "items": [
+        {
+            "food_name": "pongal",
+            "usda_query": "pongal",
+            "estimated_grams": 150,
+            "confidence": 0.7,
+            "quantity_text": "1 small cup",
+            "fallback_calories_per_100g": 130,
+            "fallback_protein_per_100g": 3.5,
+            "fallback_carbs_per_100g": 18,
+            "fallback_fat_per_100g": 4.5,
+        },
+        {
+            "food_name": "ghee",
+            "usda_query": "ghee",
+            "estimated_grams": 5,
+            "confidence": 0.6,
+            "quantity_text": "light",
+            "fallback_calories_per_100g": 900,
+        },
+    ],
+}
+
+
+def test_dish_missing_from_usda_falls_back_to_an_estimate_not_a_dead_end(client, stub_ai):
+    """USDA has no pongal; the entry must still arrive with usable numbers."""
+    stub_ai(PONGAL_MEAL)
+
+    body = client.post(
+        "/api/ai/food-text",
+        json={"text": "1 small cup pongal with light ghee and 1 boiled egg"},
+    ).json()
+
+    pongal = body["items"][0]
+    assert pongal["resolution"] == "estimated"
+    # 130 kcal/100g at 150g
+    assert pongal["calories"] == pytest.approx(195.0, abs=0.5)
+    assert pongal["protein_g"] == pytest.approx(5.3, abs=0.2)
+    assert pongal["carbs_g"] == pytest.approx(27.0, abs=0.5)
+    assert pongal["fat_g"] == pytest.approx(6.8, abs=0.2)
+    assert pongal["fdc_id"] is None, "an estimate must not claim a database id"
+    assert "estimate" in (pongal["notes"] or "").lower()
+
+    # ghee is in USDA, so it must still prefer the database over the estimate
+    ghee = body["items"][1]
+    assert ghee["resolution"] == "usda"
+    assert ghee["calories"] == pytest.approx(45.0, abs=0.5), "USDA's 900 kcal/100g at 5g"
+
+
+def test_usda_always_wins_over_the_models_estimate(client, stub_ai):
+    """The estimate is a fallback, never a substitute for real data."""
+    stub_ai(
+        {
+            "items": [
+                {
+                    "food_name": "tea",
+                    "usda_query": "tea",
+                    "estimated_grams": 100,
+                    "confidence": 0.9,
+                    "fallback_calories_per_100g": 999,
+                }
+            ]
+        }
+    )
+
+    item = client.post("/api/ai/food-text", json={"text": "a cup of tea"}).json()["items"][0]
+    assert item["resolution"] == "usda"
+    assert item["calories"] == pytest.approx(34.0, abs=0.5), "USDA's 34 kcal/100g, not the 999"
+
+
+def test_no_usda_match_and_no_estimate_still_asks_for_manual_entry(client, stub_ai):
+    stub_ai(
+        {
+            "items": [
+                {
+                    "food_name": "something unheard of",
+                    "usda_query": "unheard of dish",
+                    "estimated_grams": 200,
+                    "confidence": 0.3,
+                }
+            ]
+        }
+    )
+
+    item = client.post("/api/ai/food-text", json={"text": "a bowl of mystery"}).json()["items"][0]
+    assert item["resolution"] == "unresolved"
+    assert item["calories"] is None
+    assert "manually" in (item["notes"] or "")

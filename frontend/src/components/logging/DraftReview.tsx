@@ -101,6 +101,10 @@ export function DraftReview({ drafts, setDrafts, meal, imageUrl, onDone }: Draft
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       {entry.resolution === 'unresolved' ? (
                         <Badge tone="error">No nutrition match</Badge>
+                      ) : entry.resolution === 'estimated' ? (
+                        // Never dressed up as database-backed: these numbers are
+                        // the model's own estimate for a dish USDA does not carry.
+                        <Badge tone="warning">AI estimate</Badge>
                       ) : (
                         <Badge tone={entry.resolution === 'cache' ? 'info' : 'success'}>
                           {entry.resolution === 'cache' ? 'from cache' : 'USDA matched'}

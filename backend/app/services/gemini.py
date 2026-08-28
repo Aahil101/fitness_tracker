@@ -49,8 +49,20 @@ FOOD_VISION_SCHEMA: dict[str, Any] = {
                     "estimated_grams": {"type": "NUMBER"},
                     "confidence": {"type": "NUMBER"},
                     "preparation": {"type": "STRING"},
+                    "fallback_calories_per_100g": {"type": "NUMBER"},
+                    "fallback_protein_per_100g": {"type": "NUMBER"},
+                    "fallback_carbs_per_100g": {"type": "NUMBER"},
+                    "fallback_fat_per_100g": {"type": "NUMBER"},
                 },
-                "required": ["food_name", "usda_query", "estimated_grams", "confidence"],
+                # The calorie fallback is required: if the model omits it, a dish
+                # USDA does not carry silently becomes a dead entry again.
+                "required": [
+                    "food_name",
+                    "usda_query",
+                    "estimated_grams",
+                    "confidence",
+                    "fallback_calories_per_100g",
+                ],
             },
         },
         "meal_type": {"type": "STRING"},
@@ -76,7 +88,15 @@ Also set meal_type to one of breakfast, lunch, dinner, snack based on the food.
 Put any caveat a human should check (hidden oil, unclear sauce, obscured portion)
 in notes.
 
-If the image contains no food at all, return an empty items array and say so in notes."""
+If the image contains no food at all, return an empty items array and say so in notes.
+
+Regional and homemade dishes are often missing from USDA — pongal, idli, upma,
+sambar, poha and the like. So for every item also give your own per-100g estimate
+in fallback_calories_per_100g, fallback_protein_per_100g, fallback_carbs_per_100g
+and fallback_fat_per_100g, based on how the dish is normally made. These are used
+only when the database has no match, and are shown to the user as an estimate, so
+give your best honest figures rather than round numbers.
+"""
 
 ASSISTANT_SYSTEM_PROMPT = """You are the in-app fitness and nutrition coach for a personal tracking app.
 
@@ -342,9 +362,21 @@ MEAL_TEXT_SCHEMA: dict[str, Any] = {
                     "estimated_grams": {"type": "NUMBER"},
                     "confidence": {"type": "NUMBER"},
                     "preparation": {"type": "STRING"},
+                    "fallback_calories_per_100g": {"type": "NUMBER"},
+                    "fallback_protein_per_100g": {"type": "NUMBER"},
+                    "fallback_carbs_per_100g": {"type": "NUMBER"},
+                    "fallback_fat_per_100g": {"type": "NUMBER"},
                     "quantity_text": {"type": "STRING"},
                 },
-                "required": ["food_name", "usda_query", "estimated_grams", "confidence"],
+                # The calorie fallback is required: if the model omits it, a dish
+                # USDA does not carry silently becomes a dead entry again.
+                "required": [
+                    "food_name",
+                    "usda_query",
+                    "estimated_grams",
+                    "confidence",
+                    "fallback_calories_per_100g",
+                ],
             },
         },
         "meal_type": {"type": "STRING"},
@@ -378,6 +410,13 @@ Rules:
   you inferred the portion.
 * If nothing edible is described, return an empty items array and say why in notes.
 * Set meal_type to breakfast, lunch, dinner or snack only if the text implies it.
+
+Regional and homemade dishes are often missing from USDA — pongal, idli, upma,
+sambar, poha and the like. So for every item also give your own per-100g estimate
+in fallback_calories_per_100g, fallback_protein_per_100g, fallback_carbs_per_100g
+and fallback_fat_per_100g, based on how the dish is normally made. These are used
+only when the database has no match, and are shown to the user as an estimate, so
+give your best honest figures rather than round numbers.
 """
 
 

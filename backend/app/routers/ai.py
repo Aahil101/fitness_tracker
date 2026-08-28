@@ -87,6 +87,22 @@ async def _resolve_recognised_item(
     macros: dict[str, Any] = {}
     if item:
         macros = usda.scale_to_portion(item, grams)
+    else:
+        # USDA is US-centric, so regional and homemade dishes routinely miss —
+        # pongal, idli, upma, sambar. Rather than hand back an entry with no
+        # numbers for the user to fill in, fall back to the model's own per-100g
+        # estimate. Flagged as "estimated" so the UI can label it honestly and
+        # never pass it off as database-backed.
+        per_100g = aggregate.num(raw.get("fallback_calories_per_100g"), 0.0)
+        if per_100g > 0:
+            factor = grams / 100
+            resolution = "estimated"
+            macros = {
+                "calories": round(per_100g * factor, 1),
+                "protein_g": round(aggregate.num(raw.get("fallback_protein_per_100g"), 0.0) * factor, 1),
+                "carbs_g": round(aggregate.num(raw.get("fallback_carbs_per_100g"), 0.0) * factor, 1),
+                "fat_g": round(aggregate.num(raw.get("fallback_fat_per_100g"), 0.0) * factor, 1),
+            }
 
     display_name = name
     if preparation:
@@ -107,10 +123,20 @@ async def _resolve_recognised_item(
         food_item_id=food_item_id,
         matched_name=item.get("name") if item else None,
         resolution=resolution,
-        notes=None
-        if item
-        else "No nutrition match found — enter the calories manually before saving.",
+        notes=_resolution_note(resolution),
     )
+
+
+def _resolution_note(resolution: str) -> str | None:
+    """Say where the numbers came from, but only when it changes what to do."""
+    if resolution == "estimated":
+        return (
+            "Not in the USDA database, so these numbers are the model's estimate — "
+            "worth a glance before saving."
+        )
+    if resolution == "unresolved":
+        return "No nutrition match found — enter the calories manually before saving."
+    return None
 
 
 @router.post("/food-photo", response_model=FoodPhotoDraft)
