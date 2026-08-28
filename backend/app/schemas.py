@@ -194,6 +194,12 @@ class RecognisedFood(ApiModel):
     notes: str | None = None
 
 
+class FoodTextRequest(ApiModel):
+    """A meal typed in plain language, e.g. "half cup of tea with 1 spoon"."""
+
+    text: str = Field(min_length=2, max_length=1000)
+
+
 class FoodPhotoDraft(ApiModel):
     items: list[RecognisedFood]
     image_url: str | None = None

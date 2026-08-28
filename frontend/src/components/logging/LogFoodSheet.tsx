@@ -5,9 +5,9 @@ import {
   Clock,
   ImageUp,
   Loader2,
+  PenLine,
   Search,
   Sparkles,
-  Trash2,
   Utensils,
   X,
 } from 'lucide-react';
@@ -21,16 +21,26 @@ import {
   EmptyState,
   Sheet,
   Skeleton,
+  TextAreaField,
   TextField,
   useToast,
 } from '@/components/md';
-import { useAiStatus, useAnalysePhoto, useCreateFoodLog, useCreateFoodLogs, useRecentFoods } from '@/hooks/queries';
+import {
+  useAiStatus,
+  useAnalyseFoodText,
+  useAnalysePhoto,
+  useCreateFoodLog,
+  useRecentFoods,
+} from '@/hooks/queries';
 import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { kcal, MEAL_LABELS, MEAL_ORDER } from '@/lib/format';
-import type { FoodSearchItem, MealType, RecognisedFood } from '@/lib/types';
+import type { FoodSearchItem, MealType } from '@/lib/types';
 
-type Tab = 'search' | 'photo' | 'recent';
+import { DraftReview } from './DraftReview';
+import { fromRecognised, fromSearchItem, scale, type DraftEntry } from './draft';
+
+type Tab = 'search' | 'describe' | 'photo' | 'recent';
 
 const PORTION_PRESETS = [30, 50, 100, 150, 200, 300];
 
@@ -43,76 +53,6 @@ interface LogFoodSheetProps {
 }
 
 /** Per-100 g basis so editing the portion rescales every macro consistently. */
-interface DraftEntry {
-  key: string;
-  name: string;
-  grams: number;
-  per100: {
-    calories: number;
-    protein_g: number | null;
-    carbs_g: number | null;
-    fat_g: number | null;
-    fiber_g: number | null;
-  };
-  fdcId: string | null;
-  foodItemId: string | null;
-  confidence?: number;
-  resolution?: RecognisedFood['resolution'];
-  note?: string | null;
-}
-
-function scale(per100: DraftEntry['per100'], grams: number) {
-  const factor = grams / 100;
-  const value = (input: number | null) => (input === null ? null : Number((input * factor).toFixed(1)));
-  return {
-    calories: Number((per100.calories * factor).toFixed(1)),
-    protein_g: value(per100.protein_g),
-    carbs_g: value(per100.carbs_g),
-    fat_g: value(per100.fat_g),
-    fiber_g: value(per100.fiber_g),
-  };
-}
-
-function fromSearchItem(item: FoodSearchItem): DraftEntry {
-  return {
-    key: item.fdc_id ?? item.food_item_id ?? item.name,
-    name: item.name,
-    grams: item.serving_size_g && item.serving_size_g > 10 ? item.serving_size_g : 100,
-    per100: {
-      calories: item.calories_per_100g ?? 0,
-      protein_g: item.protein_per_100g,
-      carbs_g: item.carbs_per_100g,
-      fat_g: item.fat_per_100g,
-      fiber_g: item.fiber_per_100g,
-    },
-    fdcId: item.fdc_id,
-    foodItemId: item.food_item_id,
-  };
-}
-
-function fromRecognised(item: RecognisedFood, index: number): DraftEntry {
-  const grams = item.portion_g || 100;
-  const basis = (value: number | null) =>
-    value === null ? null : Number(((value / grams) * 100).toFixed(2));
-  return {
-    key: `${item.food_name}-${index}`,
-    name: item.food_name,
-    grams,
-    per100: {
-      calories: basis(item.calories) ?? 0,
-      protein_g: basis(item.protein_g),
-      carbs_g: basis(item.carbs_g),
-      fat_g: basis(item.fat_g),
-      fiber_g: basis(item.fiber_g),
-    },
-    fdcId: item.fdc_id,
-    foodItemId: item.food_item_id,
-    confidence: item.confidence,
-    resolution: item.resolution,
-    note: item.notes,
-  };
-}
-
 export function LogFoodSheet({ open, onClose, defaultMeal, initialTab = 'search' }: LogFoodSheetProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [meal, setMeal] = useState<MealType>(defaultMeal ?? 'lunch');
@@ -128,7 +68,7 @@ export function LogFoodSheet({ open, onClose, defaultMeal, initialTab = 'search'
       open={open}
       onClose={onClose}
       title="Log food"
-      description="Search the USDA database, photograph your plate, or repeat something you eat often."
+      description="Search the USDA database, describe your meal in your own words, photograph your plate, or repeat something you eat often."
       size="lg"
     >
       <div className="pb-4">
@@ -150,6 +90,7 @@ export function LogFoodSheet({ open, onClose, defaultMeal, initialTab = 'search'
           {(
             [
               { value: 'search', label: 'Search', icon: <Search size={16} /> },
+              { value: 'describe', label: 'Describe', icon: <PenLine size={16} /> },
               { value: 'photo', label: 'Photo', icon: <Camera size={16} /> },
               { value: 'recent', label: 'Recent', icon: <Clock size={16} /> },
             ] as const
@@ -176,6 +117,7 @@ export function LogFoodSheet({ open, onClose, defaultMeal, initialTab = 'search'
 
         <div className="mt-5">
           {tab === 'search' && <SearchTab meal={meal} onDone={onClose} />}
+          {tab === 'describe' && <DescribeTab meal={meal} onDone={onClose} />}
           {tab === 'photo' && <PhotoTab meal={meal} onDone={onClose} />}
           {tab === 'recent' && <RecentTab meal={meal} onDone={onClose} />}
         </div>
@@ -414,13 +356,133 @@ function MacroBox({ label, value, accent }: { label: string; value: string; acce
 }
 
 // ---------------------------------------------------------------------------
+// Plain language → Gemini → USDA → editable draft
+// ---------------------------------------------------------------------------
+const DESCRIBE_EXAMPLES = [
+  'half cup of tea with 1 spoon',
+  'grilled chicken 1 piece with butter 50g',
+  '2 rotis and a bowl of dal',
+  '3 boiled eggs and a slice of brown bread',
+];
+
+/**
+ * Type what you ate the way you would say it. The model only splits the sentence
+ * into foods and converts household measures to grams — every calorie still
+ * comes from USDA, so "1 spoon" of sugar is looked up, not guessed.
+ */
+function DescribeTab({ meal, onDone }: { meal: MealType; onDone: () => void }) {
+  const aiStatus = useAiStatus();
+  const analyse = useAnalyseFoodText();
+
+  const [text, setText] = useState('');
+  const [drafts, setDrafts] = useState<DraftEntry[] | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    const description = text.trim();
+    if (description.length < 2) {
+      setError('Describe what you ate first.');
+      return;
+    }
+    setError(null);
+    try {
+      const result = await analyse.mutateAsync(description);
+      setDrafts(result.items.map(fromRecognised));
+      setWarnings(result.warnings);
+    } catch (caught) {
+      const apiError = caught instanceof ApiError ? caught : null;
+      setError(
+        apiError?.isConfigError
+          ? 'Add GEMINI_API_KEY to the backend environment to enable text logging.'
+          : caught instanceof Error
+            ? caught.message
+            : 'Could not read that description.',
+      );
+    }
+  }
+
+  if (aiStatus.data && !aiStatus.data.gemini_configured) {
+    return (
+      <EmptyState
+        icon={<Sparkles size={22} />}
+        title="Text logging needs a Gemini key"
+        description="Get a free key at aistudio.google.com/apikey, add it to backend/.env as GEMINI_API_KEY, and restart the API. Search and manual entry work without it."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <TextAreaField
+        label="What did you eat?"
+        rows={3}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        placeholder="half cup of tea with 1 spoon"
+        hint="Everyday wording is fine — cups, spoons, pieces and counts all work."
+        onKeyDown={(event) => {
+          // Enter submits; Shift+Enter keeps a newline for multi-item meals.
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            void run();
+          }
+        }}
+      />
+
+      {!drafts && (
+        <div className="flex flex-wrap gap-2">
+          {DESCRIBE_EXAMPLES.map((example) => (
+            <Chip key={example} onClick={() => setText(example)}>
+              {example}
+            </Chip>
+          ))}
+        </div>
+      )}
+
+      <Button
+        fullWidth
+        size="lg"
+        loading={analyse.isPending}
+        disabled={text.trim().length < 2}
+        icon={<Sparkles size={18} />}
+        onClick={() => void run()}
+      >
+        {analyse.isPending ? 'Working out the nutrition…' : 'Read my description'}
+      </Button>
+
+      {error && (
+        <p
+          role="alert"
+          className="rounded-sm bg-md-error-container px-4 py-3 text-body-sm text-md-on-error-container"
+        >
+          {error}
+        </p>
+      )}
+
+      {warnings.map((warning) => (
+        <p
+          key={warning}
+          className="flex gap-2 rounded-sm bg-md-warning-container px-4 py-3 text-label-md text-md-on-warning-container"
+        >
+          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+          {warning}
+        </p>
+      ))}
+
+      {drafts && drafts.length > 0 && (
+        <DraftReview drafts={drafts} setDrafts={setDrafts} meal={meal} onDone={onDone} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Photo → Gemini → USDA → editable draft
 // ---------------------------------------------------------------------------
 function PhotoTab({ meal, onDone }: { meal: MealType; onDone: () => void }) {
-  const toast = useToast();
   const aiStatus = useAiStatus();
   const analyse = useAnalysePhoto();
-  const createLogs = useCreateFoodLogs();
   const fileInput = useRef<HTMLInputElement>(null);
 
   const [preview, setPreview] = useState<string | null>(null);
@@ -469,30 +531,6 @@ function PhotoTab({ meal, onDone }: { meal: MealType; onDone: () => void }) {
     }
   }
 
-  async function saveAll() {
-    if (!drafts?.length) return;
-    try {
-      const payload = drafts.map((entry) => ({
-        food_name: entry.name,
-        portion_g: entry.grams,
-        meal_type: meal,
-        // The user reviewed and accepted the estimate, so record it as confirmed.
-        source: 'ai_confirmed',
-        ai_confidence: entry.confidence,
-        image_url: imageUrl ?? undefined,
-        fdc_id: entry.fdcId ?? undefined,
-        food_item_id: entry.foodItemId ?? undefined,
-        ...scale(entry.per100, entry.grams),
-      }));
-      const result = await createLogs.mutateAsync(payload);
-      toast.success(`${result.count} ${result.count === 1 ? 'item' : 'items'} logged.`);
-      onDone();
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : 'Could not save the entries.');
-    }
-  }
-
-  const totalCalories = drafts?.reduce((sum, entry) => sum + scale(entry.per100, entry.grams).calories, 0) ?? 0;
 
   if (aiStatus.data && !aiStatus.data.gemini_configured) {
     return (
@@ -598,132 +636,13 @@ function PhotoTab({ meal, onDone }: { meal: MealType; onDone: () => void }) {
       ))}
 
       {drafts && drafts.length > 0 && (
-        <>
-          <div className="flex items-center justify-between">
-            <p className="text-label-lg font-medium">Check before saving</p>
-            <span className="tabular text-label-md text-md-on-surface-variant">
-              {kcal(totalCalories)} kcal total
-            </span>
-          </div>
-
-          <ul className="space-y-3">
-            {drafts.map((entry, index) => {
-              const macros = scale(entry.per100, entry.grams);
-              const lowConfidence = (entry.confidence ?? 1) < 0.55;
-              return (
-                <li key={entry.key}>
-                  <Card tone="low" className="rounded-md">
-                    <div className="flex items-start justify-between gap-3">
-                      <input
-                        value={entry.name}
-                        aria-label={`Name for item ${index + 1}`}
-                        onChange={(event) =>
-                          setDrafts((current) =>
-                            current?.map((row, i) =>
-                              i === index ? { ...row, name: event.target.value } : row,
-                            ) ?? null,
-                          )
-                        }
-                        className="min-w-0 flex-1 border-b border-transparent bg-transparent text-label-lg font-medium outline-none transition-colors focus:border-md-primary"
-                      />
-                      <button
-                        type="button"
-                        aria-label={`Remove ${entry.name}`}
-                        onClick={() =>
-                          setDrafts((current) => current?.filter((_, i) => i !== index) ?? null)
-                        }
-                        className="shrink-0 rounded-full p-1.5 text-md-on-surface-variant transition-colors hover:bg-md-error/10 hover:text-md-error"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {entry.resolution === 'unresolved' ? (
-                        <Badge tone="error">No nutrition match</Badge>
-                      ) : (
-                        <Badge tone={entry.resolution === 'cache' ? 'info' : 'success'}>
-                          {entry.resolution === 'cache' ? 'from cache' : 'USDA matched'}
-                        </Badge>
-                      )}
-                      {entry.confidence !== undefined && (
-                        <Badge tone={lowConfidence ? 'warning' : 'neutral'}>
-                          {Math.round(entry.confidence * 100)}% confident
-                        </Badge>
-                      )}
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-2 gap-3">
-                      <TextField
-                        label="Portion"
-                        type="number"
-                        inputMode="decimal"
-                        min={1}
-                        suffix="g"
-                        value={String(entry.grams)}
-                        onChange={(event) =>
-                          setDrafts((current) =>
-                            current?.map((row, i) =>
-                              i === index
-                                ? { ...row, grams: Math.max(1, Number(event.target.value) || 0) }
-                                : row,
-                            ) ?? null,
-                          )
-                        }
-                      />
-                      <TextField
-                        label="Calories"
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        suffix="kcal"
-                        value={String(Math.round(macros.calories))}
-                        onChange={(event) => {
-                          const nextCalories = Math.max(0, Number(event.target.value) || 0);
-                          setDrafts((current) =>
-                            current?.map((row, i) =>
-                              i === index
-                                ? {
-                                    ...row,
-                                    per100: {
-                                      ...row.per100,
-                                      calories: (nextCalories / row.grams) * 100,
-                                    },
-                                  }
-                                : row,
-                            ) ?? null,
-                          );
-                        }}
-                      />
-                    </div>
-
-                    <p className="tabular mt-2 text-label-sm text-md-on-surface-variant">
-                      P {macros.protein_g ?? '—'} g · C {macros.carbs_g ?? '—'} g · F{' '}
-                      {macros.fat_g ?? '—'} g
-                    </p>
-
-                    {entry.note && (
-                      <p className="mt-2 text-label-sm text-md-on-surface-variant/85">{entry.note}</p>
-                    )}
-                  </Card>
-                </li>
-              );
-            })}
-          </ul>
-
-          <Button
-            fullWidth
-            size="lg"
-            loading={createLogs.isPending}
-            icon={<Check size={18} />}
-            onClick={() => void saveAll()}
-          >
-            Save {drafts.length} {drafts.length === 1 ? 'item' : 'items'} · {kcal(totalCalories)} kcal
-          </Button>
-          <p className="text-center text-label-sm text-md-on-surface-variant">
-            Nothing is saved until you press this — the estimate is always yours to correct.
-          </p>
-        </>
+        <DraftReview
+          drafts={drafts}
+          setDrafts={setDrafts}
+          meal={meal}
+          imageUrl={imageUrl}
+          onDone={onDone}
+        />
       )}
     </div>
   );

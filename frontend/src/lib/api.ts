@@ -271,6 +271,10 @@ export const api = {
       redis_configured: boolean;
     }>('/api/ai/status'),
 
+  /** Free-text meal description -> the same draft shape photo logging returns. */
+  analyseFoodText: (text: string) =>
+    request<FoodPhotoDraft>('/api/ai/food-text', { method: 'POST', body: { text } }),
+
   analysePhoto: (file: File, hint?: string) => {
     const formData = new FormData();
     formData.append('file', file);

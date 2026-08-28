@@ -329,6 +329,76 @@ async def generate_json(
     return parsed if isinstance(parsed, dict) else {"result": parsed}
 
 
+MEAL_TEXT_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "items": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "food_name": {"type": "STRING"},
+                    "usda_query": {"type": "STRING"},
+                    "estimated_grams": {"type": "NUMBER"},
+                    "confidence": {"type": "NUMBER"},
+                    "preparation": {"type": "STRING"},
+                    "quantity_text": {"type": "STRING"},
+                },
+                "required": ["food_name", "usda_query", "estimated_grams", "confidence"],
+            },
+        },
+        "meal_type": {"type": "STRING"},
+        "notes": {"type": "STRING"},
+    },
+    "required": ["items"],
+}
+
+MEAL_TEXT_PROMPT = """You convert a written description of a meal into structured food items.
+
+The user types casually, in any English variety, and often mixes units:
+  "half cup of tea with 1 spoon"  ->  tea (120 g) + sugar (4 g)
+  "grilled chicken 1 piece with butter 50g"  ->  grilled chicken breast (120 g) + butter (50 g)
+  "2 rotis and a bowl of dal"  ->  roti x2 (80 g) + dal (200 g)
+
+Rules:
+* Split the description into one entry per distinct food. Never merge two foods.
+* Always resolve the portion to grams. Convert household measures using ordinary
+  cooking conventions: 1 cup liquid about 240 g, 1 tablespoon about 15 g,
+  1 teaspoon about 5 g, "1 spoon" of sugar in a drink about 4 g. Halve for
+  "half". Multiply for counts like "2 rotis".
+* "1 spoon" alongside tea or coffee means sugar unless another food is named.
+* Where the food is implied rather than stated (sugar in tea, oil for frying),
+  include it as its own item so the calories are not lost.
+* estimated_grams is the total for that entry, counting every unit of it.
+* quantity_text echoes the user's own wording for that item, so they can see how
+  their phrasing was read.
+* usda_query is a plain search phrase for a nutrition database: no counts, no
+  units, no brand names. "grilled chicken breast", not "1 piece grilled chicken".
+* confidence is 0-1: high when the food and amount are both explicit, low when
+  you inferred the portion.
+* If nothing edible is described, return an empty items array and say why in notes.
+* Set meal_type to breakfast, lunch, dinner or snack only if the text implies it.
+"""
+
+
+async def parse_meal_text(text: str) -> dict[str, Any]:
+    """Free-text meal description -> the same item shape vision produces.
+
+    Deliberately mirrors :func:`recognise_food`'s output so both paths feed the
+    identical USDA resolution step; nutrition never comes from the model.
+    """
+    cleaned = text.strip()
+    if not cleaned:
+        raise UpstreamError("Describe what you ate first.")
+
+    return await generate_json(
+        f"{MEAL_TEXT_PROMPT}\nDescription:\n{cleaned[:1000]}",
+        MEAL_TEXT_SCHEMA,
+        temperature=0.2,
+        max_output_tokens=1200,
+    )
+
+
 async def list_models() -> list[str]:
     """Names of models the configured key can actually call (diagnostics)."""
     if not settings.gemini_configured:

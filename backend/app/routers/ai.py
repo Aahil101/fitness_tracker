@@ -14,7 +14,13 @@ from ..config import settings
 from ..db import eq
 from ..deps import UserContext, fetch_food_logs, fetch_weight_logs, fetch_workouts, get_context
 from ..errors import AppError, RateLimitError, UpstreamError
-from ..schemas import FoodPhotoDraft, InsightOut, InsightRequest, RecognisedFood
+from ..schemas import (
+    FoodPhotoDraft,
+    FoodTextRequest,
+    InsightOut,
+    InsightRequest,
+    RecognisedFood,
+)
 from ..services import aggregate, gemini, insights, usda
 from ..services.forecast import forecast as run_forecast
 from .food import ensure_food_item
@@ -176,6 +182,59 @@ async def food_photo(
     return FoodPhotoDraft(
         items=items,
         image_url=image_path,
+        model=settings.gemini_model,
+        meal_type=meal_type,
+        total_calories=round(sum(i.calories or 0 for i in items), 1),
+        warnings=warnings,
+    )
+
+
+@router.post("/food-text", response_model=FoodPhotoDraft)
+async def food_text(
+    payload: FoodTextRequest,
+    ctx: UserContext = Depends(get_context),
+) -> FoodPhotoDraft:
+    """Free text -> Gemini -> USDA -> editable draft. Never writes a food_log.
+
+    Shares :func:`_resolve_recognised_item` with the photo path, so a described
+    meal and a photographed one get their nutrition from the same place: the
+    model only names foods and estimates grams.
+    """
+    limit = await check_rate_limit("vision", ctx.user_id, settings.rate_limit_vision_per_hour)
+    if not limit.allowed:
+        raise RateLimitError(
+            f"AI logging limit reached ({limit.limit}/hour). Try again in "
+            f"{max(1, limit.reset_in_s // 60)} minutes.",
+            retry_after=limit.reset_in_s,
+        )
+
+    parsed = await gemini.parse_meal_text(payload.text)
+
+    raw_items = parsed.get("items") or []
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    warnings: list[str] = []
+    if note := parsed.get("notes"):
+        warnings.append(str(note)[:300])
+    if not raw_items:
+        warnings.append(
+            "No food was recognised in that description. Try naming the food and "
+            "the amount, for example 'half cup of tea with 1 spoon of sugar'."
+        )
+
+    items = [await _resolve_recognised_item(ctx, raw) for raw in raw_items[:8] if isinstance(raw, dict)]
+
+    if any(i.resolution == "unresolved" for i in items):
+        warnings.append("Some items could not be matched to nutrition data — check them before saving.")
+
+    meal_type = str(parsed.get("meal_type") or "").lower()
+    if meal_type not in ("breakfast", "lunch", "dinner", "snack"):
+        meal_type = None  # type: ignore[assignment]
+
+    return FoodPhotoDraft(
+        items=items,
+        image_url=None,
         model=settings.gemini_model,
         meal_type=meal_type,
         total_calories=round(sum(i.calories or 0 for i in items), 1),

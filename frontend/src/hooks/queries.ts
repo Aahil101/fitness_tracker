@@ -15,6 +15,7 @@ import { api } from '@/lib/api';
 import type {
   AnalyticsResponse,
   DashboardResponse,
+  FoodLog,
   ForecastWindow,
   InsightKind,
   MeResponse,
@@ -223,6 +224,32 @@ export function useDeleteFoodLog() {
   return useMutation({ mutationFn: api.deleteFoodLog, onSuccess: invalidate });
 }
 
+/**
+ * Puts a deleted entry back. The delete endpoint returns the row it removed, so
+ * an undo needs no extra bookkeeping — it re-creates the same values, keeping
+ * the original timestamp so the entry lands back on the day it belonged to.
+ */
+export function useRestoreFoodLog() {
+  const invalidate = useInvalidateLogs();
+  return useMutation({
+    mutationFn: (log: FoodLog) =>
+      api.createFoodLog({
+        food_name: log.food_name,
+        portion_g: log.portion_g,
+        calories: log.calories,
+        protein_g: log.protein_g,
+        carbs_g: log.carbs_g,
+        fat_g: log.fat_g,
+        fiber_g: log.fiber_g,
+        meal_type: log.meal_type,
+        food_item_id: log.food_item_id,
+        source: log.source,
+        logged_at: log.logged_at,
+      }),
+    onSuccess: invalidate,
+  });
+}
+
 export function useCreateWorkout() {
   const invalidate = useInvalidateLogs();
   return useMutation({ mutationFn: api.createWorkout, onSuccess: invalidate });
@@ -270,6 +297,10 @@ export function useCompleteOnboarding() {
       void client.invalidateQueries();
     },
   });
+}
+
+export function useAnalyseFoodText() {
+  return useMutation({ mutationFn: (text: string) => api.analyseFoodText(text) });
 }
 
 export function useAnalysePhoto() {
