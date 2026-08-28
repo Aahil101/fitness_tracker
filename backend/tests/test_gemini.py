@@ -18,7 +18,13 @@ from app.services import gemini
 
 @pytest.fixture
 def mock_gemini(monkeypatch: pytest.MonkeyPatch):
-    """Swap the shared httpx client for a scripted transport, recording requests."""
+    """Swap the shared httpx client for a scripted transport, recording requests.
+
+    A fake key is set explicitly. Inheriting one from backend/.env made these
+    tests pass locally and fail in CI, where no key exists and _post bails out
+    with ConfigurationError before the transport is ever reached.
+    """
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key-not-a-real-one")
 
     def install(handler):
         seen: list[httpx.Request] = []
