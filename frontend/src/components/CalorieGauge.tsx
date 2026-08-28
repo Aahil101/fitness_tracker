@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 
+import { useCountUp } from '@/hooks/useCountUp';
 import { cn } from '@/lib/cn';
 import { kcal } from '@/lib/format';
 
@@ -139,6 +140,9 @@ export function CalorieGauge({
    * The error step only applies to a deficit goal — for a surplus (bulking)
    * target, eating above maintenance is the plan working, not a problem.
    */
+  // Counts up as food is logged, which is the whole point of the dial.
+  const shownLogged = useCountUp(logged);
+
   const isSurplusGoal = target >= safeMaintenance;
   const state = overMaintenance && !isSurplusGoal ? 'error' : overTarget ? 'warn' : 'ok';
 
@@ -300,7 +304,7 @@ export function CalorieGauge({
               numberColor,
             )}
           >
-            {kcal(logged)}
+            {kcal(shownLogged)}
           </span>
           <span className="mt-1.5 text-label-sm text-md-on-surface-variant">
             kcal logged today

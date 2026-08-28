@@ -28,8 +28,11 @@ const TONES: Record<Tone, string> = {
   tertiary: 'bg-md-tertiary-container text-md-on-tertiary-container',
   outlined: 'border border-md-outline-variant bg-md-surface text-md-on-surface',
   glass: 'md-glass text-md-on-surface',
-  // Extruded rather than layered: no border, paired light and shadow instead.
-  neo: 'bg-md-surface-container text-md-on-surface shadow-neo',
+  // Extruded with a paired light and shadow — plus a hairline border, which the
+  // pure form omits. Without one, a low-vision user cannot tell an embossed
+  // shape from the page it sits on, the documented failure of this style. The
+  // border costs nothing visually and keeps every surface identifiable.
+  neo: 'bg-md-surface-container text-md-on-surface shadow-neo ring-1 ring-md-outline-variant',
 };
 
 /**

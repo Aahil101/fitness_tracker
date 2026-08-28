@@ -1,6 +1,7 @@
 import { Flame, TrendingDown } from 'lucide-react';
 
 import { Card } from '@/components/md';
+import { useCountUp } from '@/hooks/useCountUp';
 import { cn } from '@/lib/cn';
 import { kcal } from '@/lib/format';
 import type { DeficitSummary } from '@/lib/types';
@@ -17,6 +18,7 @@ import type { DeficitSummary } from '@/lib/types';
 export function DeficitPanel({ data }: { data: DeficitSummary }) {
   const { progress_fraction: progress } = data;
   const beyondPlan = progress > 1;
+  const shownProgress = useCountUp(progress * 100);
 
   return (
     <Card tone="neo" className="flex h-full flex-col rounded-2xl sm:rounded-3xl">
@@ -64,7 +66,7 @@ export function DeficitPanel({ data }: { data: DeficitSummary }) {
         <div className="flex items-baseline justify-between text-label-sm">
           <span className="text-md-on-surface-variant">Deficit progress</span>
           <span className="tabular font-medium text-md-info">
-            {Math.round(progress * 100)}%
+            {Math.round(shownProgress)}%
             {data.target_deficit > 0 && (
               <span className="ml-1 font-normal text-md-on-surface-variant">
                 of {kcal(data.target_deficit)}
@@ -141,11 +143,14 @@ function Stat({
   hint: string;
   className: string;
 }) {
+  // Counts to the new figure when a meal changes it, so the eye can see which
+  // number moved rather than the whole panel appearing to reload.
+  const shown = useCountUp(value);
   return (
     <div>
       <dt className="text-label-sm text-md-on-surface-variant">{label}</dt>
       <dd className={cn('tabular text-headline-sm font-medium leading-tight', className)}>
-        {kcal(value)}
+        {kcal(shown)}
         <span className="ml-1 text-label-md font-normal text-md-on-surface-variant">kcal</span>
       </dd>
       <p className="font-prose text-label-sm text-md-on-surface-variant/85">{hint}</p>
