@@ -56,7 +56,21 @@ LEGACY_NUMBER_TO_ID: dict[str, str] = {
 # and it fails in runs — measured 2/6 successes with it versus 6/6 without,
 # including four consecutive failures. Foundation and SR Legacy already cover
 # generic whole foods, so dropping it is a cheap trade for a reliable search.
-PREFERRED_DATA_TYPES = ("Foundation", "SR Legacy", "Branded")
+# Survey (FNDDS) is the "as eaten" database — cooked, mixed, composite dishes,
+# which is what someone logging a meal is describing. Omitting it was the root
+# cause of threefold overestimates: without it the closest match for idli was a
+# packet of Idli Mix at 360 kcal/100 g, where FNDDS carries plain "Idli" at 128.
+# It leads the list for that reason. Foundation and SR Legacy cover single
+# ingredients, Branded covers packaged goods, and both stay behind it.
+PREFERRED_DATA_TYPES = ("Survey (FNDDS)", "Foundation", "SR Legacy", "Branded")
+
+# Ranking weight per data type: lower sorts first.
+DATA_TYPE_RANK = {
+    "survey (fndds)": 0,
+    "foundation": 1,
+    "sr legacy": 1,
+    "branded": 2,
+}
 
 # Words that mark a row as the packet rather than the meal. Matching one of
 # these against a dish someone described as cooked prices it at dry weight,
@@ -151,6 +165,7 @@ def normalise_food(food: dict[str, Any]) -> dict[str, Any]:
         "fdc_id": str(food["fdcId"]) if food.get("fdcId") else None,
         "name": description.title() if description.isupper() else description,
         "brand": brand,
+        "data_type": food.get("dataType"),
         "calories_per_100g": round(calories, 1) if calories is not None else None,
         "protein_per_100g": _round(nutrients.get(NUTRIENT_PROTEIN)),
         "carbs_per_100g": _round(nutrients.get(NUTRIENT_CARBS)),
@@ -241,11 +256,12 @@ async def search_foods(query: str, page_size: int = 20) -> list[dict[str, Any]]:
     # no brand string and so used to sort first, then priced a cooked portion at
     # dry-weight density: around 370 kcal/100 g against roughly 120 for the
     # cooked food, a threefold overstatement on staples.
-    def rank(food_item: dict[str, Any]) -> tuple[int, int]:
+    def rank(food_item: dict[str, Any]) -> tuple[int, int, int]:
         name = (food_item.get("name") or "").lower()
         unprepared = 1 if any(word in name for word in UNPREPARED_MARKERS) else 0
+        source = DATA_TYPE_RANK.get((food_item.get("data_type") or "").lower(), 3)
         branded = 1 if food_item.get("brand") else 0
-        return (unprepared, branded)
+        return (unprepared, source, branded)
 
     items.sort(key=rank)
     await cache_set_json(cache_key, items, SEARCH_TTL_S)

@@ -257,3 +257,71 @@ async def test_two_consecutive_transient_failures_give_up_cleanly(mock_usda):
     )
     assert await usda.search_foods("quinoa salad", page_size=5) == []
     assert calls["n"] == 2
+
+
+
+# --- data-type preference ----------------------------------------------------
+# FDC returns several rows for a dish. The one that matters is the "as eaten"
+# entry, and it is not the one the API lists first: searching "idli" surfaces a
+# packet of Idli Mix at dry-weight density before FNDDS's cooked Idli.
+IDLI_MIX = {
+    "fdcId": 111,
+    "description": "Idli Mix",
+    "dataType": "Branded",
+    "foodNutrients": [{"nutrientId": 1008, "unitName": "KCAL", "value": 360}],
+}
+IDLI_FNDDS = {
+    "fdcId": 222,
+    "description": "Idli",
+    "dataType": "Survey (FNDDS)",
+    "foodNutrients": [{"nutrientId": 1008, "unitName": "KCAL", "value": 128}],
+}
+RICE_RAW = {
+    "fdcId": 333,
+    "description": "White Rice",
+    "dataType": "SR Legacy",
+    "foodNutrients": [{"nutrientId": 1008, "unitName": "KCAL", "value": 370}],
+}
+RICE_COOKED = {
+    "fdcId": 444,
+    "description": "Rice, cooked, NFS",
+    "dataType": "Survey (FNDDS)",
+    "foodNutrients": [{"nutrientId": 1008, "unitName": "KCAL", "value": 129}],
+}
+
+
+async def test_the_as_eaten_row_is_preferred_over_the_packet(mock_usda):
+    """A cooked dish must not be priced from a dry mix."""
+    mock_usda([httpx.Response(200, json={"foods": [IDLI_MIX, IDLI_FNDDS]})])
+
+    items = await usda.search_foods("idli", page_size=5)
+
+    assert items[0]["name"] == "Idli", "FNDDS leads, whatever order FDC returned"
+    assert items[0]["calories_per_100g"] == 128
+
+
+async def test_raw_grain_loses_to_the_cooked_entry(mock_usda):
+    mock_usda([httpx.Response(200, json={"foods": [RICE_RAW, RICE_COOKED]})])
+
+    items = await usda.search_foods("rice cooked", page_size=5)
+
+    assert items[0]["calories_per_100g"] == 129, "cooked, not the 370 of dry rice"
+    assert items[0]["data_type"] == "Survey (FNDDS)"
+
+
+async def test_requests_include_the_survey_dataset(mock_usda, monkeypatch):
+    """Omitting FNDDS from the query is what caused the overestimates."""
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json={"foods": [IDLI_FNDDS]})
+
+    monkeypatch.setattr(
+        app_http, "_client", httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    # a query string not used by another test, or the cache answers instead
+    await usda.search_foods("idli steamed cake", page_size=5)
+
+    assert "url" in seen, "expected a live request rather than a cache hit"
+    assert "FNDDS" in seen["url"]
