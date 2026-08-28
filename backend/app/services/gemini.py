@@ -150,9 +150,14 @@ async def _post(body: dict[str, Any], *, model: str) -> dict[str, Any]:
 
     for attempt in range(2):
         try:
-            resp = await client.post(url, json=body, headers=headers)
+            resp = await client.post(
+                url, json=body, headers=headers, timeout=settings.gemini_timeout_s
+            )
         except httpx.HTTPError as exc:
-            raise UpstreamError(f"Could not reach Gemini: {exc}") from exc
+            # httpx timeout exceptions stringify to '', which logged a blank
+            # reason and hid the actual cause; fall back to the class name.
+            reason = str(exc) or type(exc).__name__
+            raise UpstreamError(f"Could not reach Gemini: {reason}") from exc
 
         if resp.status_code < 400:
             return resp.json()

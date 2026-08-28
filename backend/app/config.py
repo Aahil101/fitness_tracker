@@ -53,6 +53,10 @@ class Settings(BaseSettings):
         alias="CORS_ORIGINS",
     )
     request_timeout_s: float = Field(default=30.0, alias="REQUEST_TIMEOUT_S")
+    # Gemini needs its own, longer budget: a coach reply that reasons over a
+    # full day's log routinely runs past the 30s that suits Supabase and USDA,
+    # and exceeding it made the chat fall back to the offline reply.
+    gemini_timeout_s: float = Field(default=90.0, alias="GEMINI_TIMEOUT_S")
     max_upload_bytes: int = Field(default=8 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
 
     @field_validator("supabase_url", "gemini_api_base", "usda_api_base", "upstash_redis_rest_url")
