@@ -94,12 +94,14 @@ export function HomeGauge({
 
           {/* Column-first: this card now shares a row, so a horizontal pair
               clipped the second label at narrow widths. */}
-          <div className="flex flex-col gap-2.5 xs:flex-row">
+          {/* Full width and taller on phones: paired side by side these were
+              narrow pills with cramped labels. They only pair up with room. */}
+          <div className="flex flex-col gap-2.5 sm:flex-row">
             <Button
               size="lg"
               icon={<Camera size={20} />}
               onClick={onLogFood}
-              className="flex-1 whitespace-nowrap px-5"
+              className="h-14 w-full whitespace-nowrap px-6 sm:h-12 sm:w-auto sm:flex-1"
             >
               Log food
             </Button>
@@ -108,7 +110,7 @@ export function HomeGauge({
               variant="tonal"
               icon={<Scale size={20} />}
               onClick={onLogWeight}
-              className="flex-1 whitespace-nowrap px-5"
+              className="h-14 w-full whitespace-nowrap px-6 sm:h-12 sm:w-auto sm:flex-1"
             >
               {weight.logged_today ? 'Update weight' : 'Log weight'}
             </Button>

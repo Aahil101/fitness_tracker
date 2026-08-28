@@ -30,6 +30,8 @@ import {
   useAnalyseFoodText,
   useAnalysePhoto,
   useCreateFoodLog,
+  useCreateFoodLogs,
+  useDeleteFoodLog,
   useRecentFoods,
 } from '@/hooks/queries';
 import { api, ApiError } from '@/lib/api';
@@ -372,8 +374,11 @@ const DESCRIBE_EXAMPLES = [
  * comes from USDA, so "1 spoon" of sugar is looked up, not guessed.
  */
 function DescribeTab({ meal, onDone }: { meal: MealType; onDone: () => void }) {
+  const toast = useToast();
   const aiStatus = useAiStatus();
   const analyse = useAnalyseFoodText();
+  const createLogs = useCreateFoodLogs();
+  const deleteLog = useDeleteFoodLog();
 
   const [text, setText] = useState('');
   const [drafts, setDrafts] = useState<DraftEntry[] | null>(null);
@@ -389,8 +394,25 @@ function DescribeTab({ meal, onDone }: { meal: MealType; onDone: () => void }) {
     setError(null);
     try {
       const result = await analyse.mutateAsync(description);
-      setDrafts(result.items.map(fromRecognised));
+      const entries = result.items.map(fromRecognised);
       setWarnings(result.warnings);
+
+      if (entries.length === 0) {
+        setDrafts([]);
+        return;
+      }
+
+      // Anything without nutrition has to be filled in by hand, so those fall
+      // back to the review step rather than being logged as zero calories.
+      const missing = entries.filter((entry) => !entry.per100.calories);
+      if (missing.length > 0) {
+        setDrafts(entries);
+        return;
+      }
+
+      // Portion and calories both came from the description, so log straight
+      // away instead of asking the user to confirm numbers they already gave.
+      await logDirectly(entries, result.meal_type ?? undefined);
     } catch (caught) {
       const apiError = caught instanceof ApiError ? caught : null;
       setError(
@@ -401,6 +423,38 @@ function DescribeTab({ meal, onDone }: { meal: MealType; onDone: () => void }) {
             : 'Could not read that description.',
       );
     }
+  }
+
+
+  /** Save the parsed entries immediately, with an undo that removes them all. */
+  async function logDirectly(entries: DraftEntry[], parsedMeal?: string) {
+    const payload = entries.map((entry) => ({
+      food_name: entry.name,
+      portion_g: entry.grams,
+      meal_type: (parsedMeal as typeof meal) || meal,
+      source: 'ai_estimated',
+      ai_confidence: entry.confidence,
+      fdc_id: entry.fdcId ?? undefined,
+      food_item_id: entry.foodItemId ?? undefined,
+      ...scale(entry.per100, entry.grams),
+    }));
+
+    const total = payload.reduce((sum, row) => sum + (row.calories ?? 0), 0);
+    const result = await createLogs.mutateAsync(payload);
+    const created = result.logs ?? [];
+
+    toast.show(
+      `Logged ${entries.length === 1 ? entries[0].name : `${entries.length} items`} · ${kcal(total)} kcal`,
+      'success',
+      {
+        label: 'Undo',
+        onClick: () => {
+          created.forEach((log) => deleteLog.mutate(log.id));
+        },
+      },
+    );
+    setText('');
+    onDone();
   }
 
   if (aiStatus.data && !aiStatus.data.gemini_configured) {
@@ -444,12 +498,12 @@ function DescribeTab({ meal, onDone }: { meal: MealType; onDone: () => void }) {
       <Button
         fullWidth
         size="lg"
-        loading={analyse.isPending}
+        loading={analyse.isPending || createLogs.isPending}
         disabled={text.trim().length < 2}
         icon={<Sparkles size={18} />}
         onClick={() => void run()}
       >
-        {analyse.isPending ? 'Working out the nutrition…' : 'Read my description'}
+        {analyse.isPending || createLogs.isPending ? 'Working out the nutrition…' : 'Log this'}
       </Button>
 
       {error && (
