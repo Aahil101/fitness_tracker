@@ -58,6 +58,22 @@ LEGACY_NUMBER_TO_ID: dict[str, str] = {
 # generic whole foods, so dropping it is a cheap trade for a reliable search.
 PREFERRED_DATA_TYPES = ("Foundation", "SR Legacy", "Branded")
 
+# Words that mark a row as the packet rather than the meal. Matching one of
+# these against a dish someone described as cooked prices it at dry weight,
+# which is roughly three times too much for rice, dal, idli and dosa.
+UNPREPARED_MARKERS = (
+    "mix",
+    "powder",
+    "dry",
+    "dried",
+    "uncooked",
+    "raw",
+    "instant",
+    "flour",
+    "unprepared",
+    "concentrate",
+)
+
 # nginx in front of the FDC API intermittently rejects a request that succeeds
 # moments later with the same URL, so one retry is worth it. Genuine API
 # validation errors come back as JSON and are not retried.
@@ -219,8 +235,17 @@ async def search_foods(query: str, page_size: int = 20) -> list[dict[str, Any]]:
 
     # Foundation/SR Legacy entries are generic whole foods and usually what a
     # person means when they type "chicken breast"; branded rows go last.
-    def rank(food_item: dict[str, Any]) -> int:
-        return 1 if food_item.get("brand") else 0
+    #
+    # Dry and unprepared rows are pushed back further still. FDC is full of
+    # packet goods — "Idli Mix", "Dosa Mix", "Chana Dal", raw rice — which carry
+    # no brand string and so used to sort first, then priced a cooked portion at
+    # dry-weight density: around 370 kcal/100 g against roughly 120 for the
+    # cooked food, a threefold overstatement on staples.
+    def rank(food_item: dict[str, Any]) -> tuple[int, int]:
+        name = (food_item.get("name") or "").lower()
+        unprepared = 1 if any(word in name for word in UNPREPARED_MARKERS) else 0
+        branded = 1 if food_item.get("brand") else 0
+        return (unprepared, branded)
 
     items.sort(key=rank)
     await cache_set_json(cache_key, items, SEARCH_TTL_S)

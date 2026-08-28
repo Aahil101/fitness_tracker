@@ -398,6 +398,14 @@ Rules:
   cooking conventions: 1 cup liquid about 240 g, 1 tablespoon about 15 g,
   1 teaspoon about 5 g, "1 spoon" of sugar in a drink about 4 g. Halve for
   "half". Multiply for counts like "2 rotis".
+* A cup of a solid food is not 240 g — that is the volume of water it displaces.
+  Use the cooked weight people actually serve: 1 cup cooked rice about 160 g,
+  1 cup dal or curry about 200 g, 1 cup cooked pasta about 140 g, 1 cup yoghurt
+  about 245 g. Per piece: 1 roti or chapati about 40 g, 1 idli about 50 g,
+  1 dosa about 90 g, 1 slice of bread about 30 g, 1 egg about 50 g.
+* Give the weight of the food as eaten, cooked, not its dry ingredients. Rice,
+  dal, pasta and lentils roughly double or triple in weight when cooked, so
+  their per-100g energy is far lower than the packet's.
 * "1 spoon" alongside tea or coffee means sugar unless another food is named.
 * Where the food is implied rather than stated (sugar in tea, oil for frying),
   include it as its own item so the calories are not lost.

@@ -41,6 +41,8 @@ USDA_MATCHES = {
     # Ghee is in USDA even though pongal is not, which is what makes the mixed
     # South Indian meal a good test of database-vs-estimate precedence.
     "ghee": {"fdc_id": "3", "name": "Ghee", "calories_per_100g": 900.0},
+    # What FDC actually returns for "idli": the packet, at dry-weight density.
+    "idli": {"fdc_id": "4", "name": "Idli Mix", "calories_per_100g": 360.0},
 }
 
 
@@ -196,8 +198,8 @@ def test_dish_missing_from_usda_falls_back_to_an_estimate_not_a_dead_end(client,
     assert ghee["calories"] == pytest.approx(45.0, abs=0.5), "USDA's 900 kcal/100g at 5g"
 
 
-def test_usda_always_wins_over_the_models_estimate(client, stub_ai):
-    """The estimate is a fallback, never a substitute for real data."""
+def test_usda_wins_when_its_numbers_are_plausible(client, stub_ai):
+    """A database row beats an estimate — as long as it is the same food."""
     stub_ai(
         {
             "items": [
@@ -206,7 +208,8 @@ def test_usda_always_wins_over_the_models_estimate(client, stub_ai):
                     "usda_query": "tea",
                     "estimated_grams": 100,
                     "confidence": 0.9,
-                    "fallback_calories_per_100g": 999,
+                    # close to USDA's 34 kcal/100g, so the row is trusted
+                    "fallback_calories_per_100g": 30,
                 }
             ]
         }
@@ -214,7 +217,37 @@ def test_usda_always_wins_over_the_models_estimate(client, stub_ai):
 
     item = client.post("/api/ai/food-text", json={"text": "a cup of tea"}).json()["items"][0]
     assert item["resolution"] == "usda"
-    assert item["calories"] == pytest.approx(34.0, abs=0.5), "USDA's 34 kcal/100g, not the 999"
+    assert item["calories"] == pytest.approx(34.0, abs=0.5), "USDA's figure, not the estimate"
+
+
+def test_a_dry_mix_matched_to_a_cooked_dish_is_rejected(client, stub_ai):
+    """The reason logged calories came out three times too high.
+
+    FDC is full of packet goods, and they carry no brand string so they sorted
+    first: steamed idli matched "Idli Mix", cooked rice matched raw rice. The row
+    then priced a cooked portion at dry weight — about 360 kcal/100 g against 120
+    for the food actually eaten. An energy density that far from the model's own
+    estimate means a different food, so the estimate is used instead.
+    """
+    stub_ai(
+        {
+            "items": [
+                {
+                    "food_name": "idli",
+                    "usda_query": "idli",
+                    "estimated_grams": 110,
+                    "confidence": 0.8,
+                    "fallback_calories_per_100g": 120,
+                }
+            ]
+        }
+    )
+
+    item = client.post("/api/ai/food-text", json={"text": "2 idli"}).json()["items"][0]
+    assert item["resolution"] == "estimated", "the dry mix must not be used"
+    assert item["calories"] == pytest.approx(132.0, abs=1.0), "110g at the estimated 120/100g"
+    assert item["fdc_id"] is None
+    assert item["matched_name"] is None
 
 
 def test_no_usda_match_and_no_estimate_still_asks_for_manual_entry(client, stub_ai):

@@ -30,6 +30,12 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"}
+# How far a database row's energy density may sit from the model's estimate
+# before the row is treated as a different food. 1.75x is wide enough to absorb
+# ordinary recipe variation and preparation differences, and narrow enough to
+# catch a dry mix standing in for a cooked dish.
+DENSITY_DISAGREEMENT = 1.75
+
 EXTENSION_BY_TYPE = {
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
@@ -84,25 +90,41 @@ async def _resolve_recognised_item(
             item, resolution = match, "usda"
             food_item_id = await ensure_food_item(ctx.db, match)
 
+    # A database row is only better than the model's estimate if it is the right
+    # food. FDC matched "Idli Mix" for steamed idli and raw rice for cooked rice,
+    # pricing a portion at dry-weight density — roughly 370 kcal/100 g against
+    # about 120 for the food actually eaten. Comparing the two densities catches
+    # that without having to enumerate the dishes it happens to: a disagreement
+    # this wide means the row is a different food, so the estimate wins.
+    model_per_100g = aggregate.num(raw.get("fallback_calories_per_100g"), 0.0)
+    if item and model_per_100g > 0:
+        row_per_100g = aggregate.num(item.get("calories_per_100g"), 0.0)
+        if row_per_100g > 0:
+            ratio = row_per_100g / model_per_100g
+            if ratio > DENSITY_DISAGREEMENT or ratio < 1 / DENSITY_DISAGREEMENT:
+                log.info(
+                    "Rejecting USDA match %r for %r: %.0f vs %.0f kcal/100g",
+                    item.get("name"), query, row_per_100g, model_per_100g,
+                )
+                item, resolution, food_item_id = None, "estimated", None
+
     macros: dict[str, Any] = {}
     if item:
         macros = usda.scale_to_portion(item, grams)
-    else:
+    elif model_per_100g > 0:
         # USDA is US-centric, so regional and homemade dishes routinely miss —
         # pongal, idli, upma, sambar. Rather than hand back an entry with no
         # numbers for the user to fill in, fall back to the model's own per-100g
         # estimate. Flagged as "estimated" so the UI can label it honestly and
         # never pass it off as database-backed.
-        per_100g = aggregate.num(raw.get("fallback_calories_per_100g"), 0.0)
-        if per_100g > 0:
-            factor = grams / 100
-            resolution = "estimated"
-            macros = {
-                "calories": round(per_100g * factor, 1),
-                "protein_g": round(aggregate.num(raw.get("fallback_protein_per_100g"), 0.0) * factor, 1),
-                "carbs_g": round(aggregate.num(raw.get("fallback_carbs_per_100g"), 0.0) * factor, 1),
-                "fat_g": round(aggregate.num(raw.get("fallback_fat_per_100g"), 0.0) * factor, 1),
-            }
+        factor = grams / 100
+        resolution = "estimated"
+        macros = {
+            "calories": round(model_per_100g * factor, 1),
+            "protein_g": round(aggregate.num(raw.get("fallback_protein_per_100g"), 0.0) * factor, 1),
+            "carbs_g": round(aggregate.num(raw.get("fallback_carbs_per_100g"), 0.0) * factor, 1),
+            "fat_g": round(aggregate.num(raw.get("fallback_fat_per_100g"), 0.0) * factor, 1),
+        }
 
     display_name = name
     if preparation:
