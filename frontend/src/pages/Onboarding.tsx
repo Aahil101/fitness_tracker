@@ -44,6 +44,21 @@ const PACE_OPTIONS = [
 
 const STEPS = ['About you', 'Your weight', 'Your pace'] as const;
 
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+] as const;
+
+/** Youngest and oldest ages the metabolic equation is validated for. */
+const MIN_AGE = 13;
+const MAX_AGE = 100;
+
+/** Calendar length of a month, leap-year aware once a year is chosen. */
+function daysInMonth(year: number | null, month: number | null): number {
+  if (!month) return 31;
+  return new Date(year ?? 2000, month, 0).getDate();
+}
+
 /**
  * First-run setup. Three short steps because the forecasting maths genuinely
  * needs height, age and sex — Mifflin-St Jeor cannot run without them, and
@@ -57,13 +72,41 @@ export function Onboarding() {
   const [unit, setUnit] = useState<UnitPreference>('metric');
   const [fullName, setFullName] = useState('');
   const [sex, setSex] = useState<Sex>('male');
-  const [birthDate, setBirthDate] = useState('');
+  // Split into three selects: a native date input makes people click back
+  // through decades of months to reach a birth year.
+  const [birthDay, setBirthDay] = useState('');
+  const [birthMonth, setBirthMonth] = useState('');
+  const [birthYear, setBirthYear] = useState('');
   const [heightValue, setHeightValue] = useState('');
   const [currentWeight, setCurrentWeight] = useState('');
   const [goalWeight, setGoalWeight] = useState('');
   const [activity, setActivity] = useState<ActivityLevel>('sedentary');
   const [pace, setPace] = useState(-0.5);
   const [error, setError] = useState<string | null>(null);
+
+  // Year range runs newest-first so the common case is a short scroll.
+  const years = useMemo(() => {
+    const thisYear = new Date().getFullYear();
+    return Array.from({ length: MAX_AGE - MIN_AGE + 1 }, (_, i) => thisYear - MIN_AGE - i);
+  }, []);
+
+  const dayCount = daysInMonth(Number(birthYear) || null, Number(birthMonth) || null);
+  const days = useMemo(
+    () => Array.from({ length: dayCount }, (_, i) => i + 1),
+    [dayCount],
+  );
+
+  /** ISO date the API expects, or '' until all three parts are chosen. */
+  const birthDate = useMemo(() => {
+    if (!birthDay || !birthMonth || !birthYear) return '';
+    return `${birthYear}-${birthMonth.padStart(2, '0')}-${birthDay.padStart(2, '0')}`;
+  }, [birthDay, birthMonth, birthYear]);
+
+  /** Keep 31 Feb from ever existing: clamp the day when the month/year shrinks. */
+  function clampDay(nextMonth: string, nextYear: string) {
+    const limit = daysInMonth(Number(nextYear) || null, Number(nextMonth) || null);
+    if (birthDay && Number(birthDay) > limit) setBirthDay(String(limit));
+  }
 
   const heightCm = useMemo(() => {
     const raw = Number(heightValue);
@@ -184,19 +227,6 @@ export function Onboarding() {
           </div>
         </div>
 
-        {/* Progress rail */}
-        <div className="mt-6 flex gap-2" aria-hidden>
-          {STEPS.map((label, index) => (
-            <span
-              key={label}
-              className={cn(
-                'h-1.5 flex-1 rounded-full transition-colors duration-medium',
-                index <= step ? 'bg-md-primary' : 'bg-md-surface-container-high',
-              )}
-            />
-          ))}
-        </div>
-
         <Card tone="container" className="mt-6 rounded-2xl">
           <AnimatePresence mode="wait">
             <motion.div
@@ -245,15 +275,60 @@ export function Onboarding() {
                     <option value="other">Prefer not to say</option>
                   </SelectField>
 
-                  <TextField
-                    label="Date of birth"
-                    type="date"
-                    value={birthDate}
-                    max={new Date().toISOString().slice(0, 10)}
-                    onChange={(event) => setBirthDate(event.target.value)}
-                    hint={age !== null ? `${age} years old` : undefined}
-                    required
-                  />
+                  <div>
+                    <p className="px-1 text-label-md text-md-on-surface-variant">Date of birth</p>
+                    <div className="mt-1.5 grid grid-cols-[1fr_1.4fr_1fr] gap-2">
+                      <SelectField
+                        label="Day"
+                        value={birthDay}
+                        onChange={(event) => setBirthDay(event.target.value)}
+                      >
+                        <option value="">–</option>
+                        {days.map((day) => (
+                          <option key={day} value={day}>
+                            {day}
+                          </option>
+                        ))}
+                      </SelectField>
+
+                      <SelectField
+                        label="Month"
+                        value={birthMonth}
+                        onChange={(event) => {
+                          setBirthMonth(event.target.value);
+                          clampDay(event.target.value, birthYear);
+                        }}
+                      >
+                        <option value="">–</option>
+                        {MONTHS.map((month, index) => (
+                          <option key={month} value={index + 1}>
+                            {month}
+                          </option>
+                        ))}
+                      </SelectField>
+
+                      <SelectField
+                        label="Year"
+                        value={birthYear}
+                        onChange={(event) => {
+                          setBirthYear(event.target.value);
+                          clampDay(birthMonth, event.target.value);
+                        }}
+                      >
+                        <option value="">–</option>
+                        {years.map((year) => (
+                          <option key={year} value={year}>
+                            {year}
+                          </option>
+                        ))}
+                      </SelectField>
+                    </div>
+                    {age !== null && (
+                      <p className="mt-1.5 px-1 text-label-sm text-md-on-surface-variant">
+                        {age} years old
+                      </p>
+                    )}
+                  </div>
 
                   <TextField
                     label={`Height (${unit === 'imperial' ? 'inches' : 'cm'})`}
