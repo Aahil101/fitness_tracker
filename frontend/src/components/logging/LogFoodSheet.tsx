@@ -49,11 +49,12 @@ interface LogFoodSheetProps {
   onClose: () => void;
   defaultMeal?: MealType;
   /** Opens straight onto the camera tab (used by the PWA shortcut). */
+  /** Describe opens first: typing a sentence is the quickest way to log. */
   initialTab?: Tab;
 }
 
 /** Per-100 g basis so editing the portion rescales every macro consistently. */
-export function LogFoodSheet({ open, onClose, defaultMeal, initialTab = 'search' }: LogFoodSheetProps) {
+export function LogFoodSheet({ open, onClose, defaultMeal, initialTab = 'describe' }: LogFoodSheetProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [meal, setMeal] = useState<MealType>(defaultMeal ?? 'lunch');
 
@@ -85,7 +86,7 @@ export function LogFoodSheet({ open, onClose, defaultMeal, initialTab = 'search'
         <div
           role="tablist"
           aria-label="Entry method"
-          className="mt-4 grid grid-cols-3 gap-1 rounded-full bg-md-surface-container-low p-1"
+          className="mt-4 grid grid-cols-2 gap-1 rounded-3xl bg-md-surface-container-low p-1 sm:grid-cols-4 sm:rounded-full"
         >
           {(
             [

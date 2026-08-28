@@ -10,17 +10,24 @@
 @layer base {
   :root {
     /* Surfaces */
-    --md-surface: 255 251 254; /* #FFFBFE — warm off-white, never pure white */
-    --md-surface-dim: 222 216 225;
-    --md-surface-container-low: 231 224 236; /* #E7E0EC — inputs, recessed */
-    --md-surface-container: 243 237 247; /* #F3EDF7 — default card */
-    --md-surface-container-high: 236 230 240;
-    --md-surface-container-highest: 230 224 233;
-    --md-surface-variant: 231 224 236;
+    /*
+     * Neutral surface ramp. MD3 tints surfaces with the primary hue, which left
+     * every card and input visibly lilac and washed out the contrast between
+     * levels. These are plain greys: white page, barely-grey cards, a slightly
+     * deeper grey for inputs, so each step is distinguishable and the purple is
+     * reserved for actual accents.
+     */
+    --md-surface: 255 255 255; /* true white page */
+    --md-surface-dim: 241 241 244;
+    --md-surface-container-low: 244 244 246; /* inputs, recessed */
+    --md-surface-container: 249 249 251; /* default card, just off white */
+    --md-surface-container-high: 238 238 242;
+    --md-surface-container-highest: 231 231 236;
+    --md-surface-variant: 236 236 240;
 
     /* Content */
-    --md-on-surface: 28 27 31; /* #1C1B1F */
-    --md-on-surface-variant: 73 69 79; /* #49454F */
+    --md-on-surface: 24 24 27;
+    --md-on-surface-variant: 91 91 100; /* secondary text, neutral */
 
     /* Primary */
     --md-primary: 103 80 164; /* #6750A4 */
@@ -68,8 +75,8 @@
     --md-on-info-container: 0 72 150;
 
     /* Outlines */
-    --md-outline: 121 116 126; /* #79747E */
-    --md-outline-variant: 202 196 208;
+    --md-outline: 138 138 148;
+    --md-outline-variant: 220 220 226;
 
     /* Inverse */
     --md-inverse-surface: 49 48 51;
@@ -96,16 +103,17 @@
   }
 
   .dark {
-    --md-surface: 20 18 24; /* #141218 */
-    --md-surface-dim: 16 14 20;
-    --md-surface-container-low: 29 27 32;
-    --md-surface-container: 33 31 38;
-    --md-surface-container-high: 43 41 48;
-    --md-surface-container-highest: 54 52 59;
-    --md-surface-variant: 73 69 79;
+    /* Neutral dark ramp, same reasoning: no purple cast, clear steps. */
+    --md-surface: 17 17 19; /* near-black page */
+    --md-surface-dim: 12 12 14;
+    --md-surface-container-low: 24 24 27;
+    --md-surface-container: 30 30 34; /* default card */
+    --md-surface-container-high: 39 39 44;
+    --md-surface-container-highest: 49 49 55;
+    --md-surface-variant: 60 60 66;
 
-    --md-on-surface: 230 224 233;
-    --md-on-surface-variant: 202 196 208;
+    --md-on-surface: 236 236 241;
+    --md-on-surface-variant: 176 176 186; /* secondary text, neutral */
 
     --md-primary: 208 188 255; /* #D0BCFF */
     --md-on-primary: 56 30 114;
@@ -139,8 +147,8 @@
     --md-info-container: 0 46 97;
     --md-on-info-container: 135 192 255;
 
-    --md-outline: 147 143 153;
-    --md-outline-variant: 73 69 79;
+    --md-outline: 130 130 140;
+    --md-outline-variant: 58 58 64;
 
     --md-inverse-surface: 230 224 233;
     --md-inverse-on-surface: 49 48 51;
