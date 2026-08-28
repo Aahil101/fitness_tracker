@@ -101,6 +101,44 @@ class TestStages:
         for stage in stages:
             assert stage.spec.label and stage.spec.summary and stage.spec.detail
 
+    def test_the_fed_window_never_shrinks_with_glycogen(self):
+        """Regression: a low-carb day once produced a 30-minute "Fed" stage.
+
+        How long digestion takes is a property of the meal, not of how full the
+        liver is. Only the fuel-driven boundaries may move.
+        """
+        for shift in (-6.0, -3.0, 0.0, 3.0, 6.0):
+            stages = fasting.build_stages(elapsed_hours=0.0, shift_hours=shift, started_at=None)
+            fed = stages[0]
+            assert fed.end_hours == pytest.approx(4.0), f"fed window moved at shift {shift}"
+
+    def test_a_depleted_day_still_leaves_a_credible_timeline(self):
+        """Regression: the fill floor was applied before training was subtracted.
+
+        Both reductions then compounded, and a low-carb day with one hard
+        session estimated under two hours of fuel — which would have put ketosis
+        before the user had finished digesting.
+        """
+        result = fasting.personalise(
+            weight_kg=83.0, maintenance_kcal=2518.0, recent_carbs_g=46.0, exercise_kcal=436.0
+        )
+        assert result.estimated_depletion_hours >= 4.0
+        assert result.fill_fraction >= fasting.MIN_FILL_FRACTION
+        stages = fasting.build_stages(
+            elapsed_hours=0.0, shift_hours=result.shift_hours, started_at=None
+        )
+        # Whatever the inputs, fat burning cannot precede the end of digestion.
+        fat_burning = next(s for s in stages if s.spec.key == "fat_burning")
+        assert fat_burning.start_hours >= 4.0
+
+    def test_eating_more_carbs_than_the_liver_holds_buys_nothing(self):
+        """The tank cannot overfill, so 600 g should not beat 300 g."""
+        normal = fasting.personalise(**BASE, recent_carbs_g=300.0)
+        huge = fasting.personalise(**BASE, recent_carbs_g=600.0)
+        assert huge.estimated_depletion_hours == pytest.approx(
+            normal.estimated_depletion_hours, abs=0.01
+        )
+
     def test_boundaries_stay_monotonic_under_an_extreme_shift(self):
         """A large negative shift must not produce a stage of negative width."""
         stages = fasting.build_stages(elapsed_hours=0.0, shift_hours=-6.0, started_at=None)

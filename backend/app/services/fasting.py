@@ -116,7 +116,11 @@ STAGE_SPECS: tuple[StageSpec, ...] = (
             "main event."
         ),
         start_hours=4.0,
-        shift_weight=0.6,
+        # Deliberately unshifted. How long you spend digesting is a function of
+        # the meal, not of how full your liver is — a depleted athlete still
+        # takes hours to clear a meal. Shifting this produced a 30-minute "Fed"
+        # stage for a low-carb day, which is plainly wrong.
+        shift_weight=0.0,
     ),
     StageSpec(
         key="fat_burning",
@@ -312,15 +316,15 @@ def personalise(
     if recent_carbs_g is None:
         # Nothing logged before the fast. Assuming an empty tank would promise
         # ketosis absurdly early, so assume a normal day and say so.
-        fill = 1.0
+        carb_fill = 1.0
         notes.append(
             "No food logged before this fast, so it assumes you ate normally. Logging "
             "your last meal sharpens these timings considerably."
         )
     else:
-        fill = _clamp(
-            recent_carbs_g / (capacity_g * CARBS_TO_FILL_MULTIPLE), MIN_FILL_FRACTION, 1.0
-        )
+        # Capped at 1 before anything else: the liver cannot hold more than it
+        # holds, so eating 500 g of carbohydrate does not buy extra hours.
+        carb_fill = min(1.0, recent_carbs_g / (capacity_g * CARBS_TO_FILL_MULTIPLE))
         used.append("the carbs in your last meals")
 
     drain = REFERENCE_DRAIN_G_PER_H * (maintenance_kcal / REFERENCE_MAINTENANCE_KCAL)
@@ -333,7 +337,11 @@ def personalise(
     if exercise_kcal > 0:
         used.append("your recent training")
 
-    available = max(0.0, capacity_g * fill - exercise_glycogen)
+    # Floor applied last, to the amount actually left. Some glycogen is always
+    # turning over, so a low-carb day plus a hard session cannot drive this to
+    # nothing — it can only drive it to the floor.
+    available = max(capacity_g * carb_fill - exercise_glycogen, capacity_g * MIN_FILL_FRACTION)
+    fill = available / capacity_g
     depletion_hours = available / drain
 
     raw_shift = depletion_hours - BASELINE_DEPLETION_HOURS
