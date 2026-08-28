@@ -70,7 +70,7 @@ export function EmptyState({
       <div>
         <p className="text-title-md font-medium text-md-on-surface">{title}</p>
         {description && (
-          <p className="mx-auto mt-1 max-w-sm text-body-sm text-md-on-surface-variant">
+          <p className="mx-auto mt-1 max-w-sm font-prose text-body-sm text-md-on-surface-variant">
             {description}
           </p>
         )}

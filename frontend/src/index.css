@@ -69,7 +69,14 @@
     --md-warning: 178 139 58;
     --md-warning-container: 253 243 223;
     --md-on-warning-container: 100 78 32;
-    --md-info: 0 122 255;
+    --md-info: 0 122 255; /* #007AFF as given — accents, badges, icons */
+    /*
+     * Button fills use the same blue darkened a shade. White on #007AFF is
+     * 4.02:1, just under the 4.5:1 a label needs, so the accent stays exact
+     * where it decorates and the fill shifts only enough for white to clear AA
+     * (5.19:1).
+     */
+    --md-info-strong: 0 105 219;
     --md-on-info: 255 255 255;
     --md-info-container: 209 231 255;
     --md-on-info-container: 0 72 150;
@@ -143,7 +150,8 @@
     --md-warning-container: 93 73 30;
     --md-on-warning-container: 251 230 186;
     --md-info: 13 129 255;
-    --md-on-info: 0 0 0;
+    --md-info-strong: 0 105 219;
+    --md-on-info: 255 255 255;
     --md-info-container: 0 46 97;
     --md-on-info-container: 135 192 255;
 

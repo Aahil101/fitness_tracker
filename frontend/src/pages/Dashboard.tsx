@@ -2,6 +2,7 @@ import { Dumbbell, Flame, Plus, Scale, Trash2, Utensils } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
+import { DeficitPanel } from '@/components/DeficitPanel';
 import { HomeGauge } from '@/components/HomeGauge';
 import { InsightCard } from '@/components/InsightCard';
 import { LogFoodSheet } from '@/components/logging/LogFoodSheet';
@@ -90,14 +91,23 @@ export function Dashboard() {
         </h1>
       </div>
 
-      <HomeGauge
-        data={data}
-        forecastWindow={forecastWindow}
-        onForecastWindowChange={setForecastWindow}
-        onLogFood={() => setFoodOpen(true)}
-        onLogWeight={() => setWeightOpen(true)}
-        unit={unit}
-      />
+      {/*
+        Stats lead on the left because the numbers are what the user came for;
+        the gauge sits alongside as the visual summary rather than the headline.
+        Stacked on narrow screens, stats first.
+      */}
+      <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] lg:items-start">
+        <DeficitPanel data={data.deficit} />
+
+        <HomeGauge
+          data={data}
+          forecastWindow={forecastWindow}
+          onForecastWindowChange={setForecastWindow}
+          onLogFood={() => setFoodOpen(true)}
+          onLogWeight={() => setWeightOpen(true)}
+          unit={unit}
+        />
+      </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
         <InsightCard />

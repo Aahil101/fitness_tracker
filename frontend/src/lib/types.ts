@@ -133,6 +133,24 @@ export interface ForecastState {
   notes: string[];
 }
 
+export interface DeficitSummary {
+  maintenance_calories: number;
+  target_calories: number;
+  exercise_burn: number;
+  eaten_calories: number;
+  food_deficit: number;
+  exercise_deficit: number;
+  total_deficit: number;
+  target_deficit: number;
+  progress_fraction: number;
+  tracked_days: number;
+  min_days_required: number;
+  has_enough_history: boolean;
+  avg_daily_deficit: number;
+  projections: { days: number; loss_kg: number; weight_kg?: number }[];
+  note: string;
+}
+
 export interface DashboardResponse {
   today: {
     date: string;
@@ -150,6 +168,7 @@ export interface DashboardResponse {
   goal: Goal;
   gauge: GaugeState;
   periods: Record<PeriodKey, PeriodStats>;
+  deficit: DeficitSummary;
   forecast: ForecastState;
   weight: {
     current_kg: number | null;

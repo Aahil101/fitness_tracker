@@ -64,6 +64,7 @@ export default {
           'warning-container': token('--md-warning-container'),
           'on-warning-container': token('--md-on-warning-container'),
           info: token('--md-info'),
+          'info-strong': token('--md-info-strong'),
           'on-info': token('--md-on-info'),
           'info-container': token('--md-info-container'),
           'on-info-container': token('--md-on-info-container'),
@@ -91,7 +92,10 @@ export default {
       },
 
       fontFamily: {
-        sans: ['Roboto', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        // Scoutie Sans carries the interface; Inter is for descriptive copy,
+        // where its larger x-height reads better at small sizes.
+        sans: ['"Scoutie Sans"', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        prose: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
         // Tabular figures keep changing numbers from jittering the layout.
         numeric: ['"Roboto Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },

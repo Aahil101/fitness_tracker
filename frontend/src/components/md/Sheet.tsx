@@ -107,7 +107,7 @@ export function Sheet({
               <div className="min-w-0">
                 <h2 className="text-title-lg font-medium text-md-on-surface">{title}</h2>
                 {description && (
-                  <p className="mt-1 text-body-sm text-md-on-surface-variant">{description}</p>
+                  <p className="mt-1 font-prose text-body-sm text-md-on-surface-variant">{description}</p>
                 )}
               </div>
               {!hideClose && (

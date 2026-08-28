@@ -19,8 +19,14 @@ import { kcal } from '@/lib/format';
 
 type Orientation = 'flat-top' | 'flat-bottom';
 
-/** 'flat-top' = flat edge up, arc bowing downwards (spec default). */
-const ORIENTATION: Orientation = 'flat-top';
+/**
+ * 'flat-bottom' = flat edge down, arc bowing upwards, so it fills bottom to top.
+ *
+ * Cast rather than annotated: with a plain annotation TypeScript narrows a const
+ * to its literal and then reports the other branch of every orientation check as
+ * unreachable, which defeats the point of keeping this a one-value switch.
+ */
+const ORIENTATION = 'flat-bottom' as Orientation;
 
 /** false mirrors the scale so maintenance sits on the left. */
 const ZERO_ON_LEFT = true;

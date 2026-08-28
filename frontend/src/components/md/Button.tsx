@@ -20,12 +20,14 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
  * swap, and `active:scale-95` so presses feel physical.
  */
 const VARIANTS: Record<ButtonVariant, string> = {
-  filled: 'bg-md-primary text-md-on-primary hover:bg-md-primary/90 active:bg-md-primary/80 hover:shadow-e2',
+  // Blue on white: the purple filled button did not stand out enough against
+  // the neutral surfaces, so primary actions now use the blue accent.
+  filled: 'bg-md-info-strong text-md-on-info hover:bg-md-info-strong/90 active:bg-md-info-strong/80 hover:shadow-e2',
   tonal:
     'bg-md-secondary-container text-md-on-secondary-container hover:bg-md-secondary-container/80 active:bg-md-secondary-container/70 hover:shadow-e1',
   outlined:
-    'border border-md-outline text-md-primary hover:bg-md-primary/[0.08] active:bg-md-primary/[0.12]',
-  text: 'text-md-primary hover:bg-md-primary/[0.08] active:bg-md-primary/[0.12]',
+    'border border-md-outline text-md-info hover:bg-md-info/[0.08] active:bg-md-info/[0.12]',
+  text: 'text-md-info hover:bg-md-info/[0.08] active:bg-md-info/[0.12]',
   elevated:
     'bg-md-surface-container-low text-md-primary shadow-e1 hover:shadow-e2 hover:bg-md-primary/[0.06]',
   danger: 'bg-md-error text-md-on-error hover:bg-md-error/90 active:bg-md-error/80',

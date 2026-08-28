@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query
 
 from ..db import build_params, eq
 from ..deps import UserContext, fetch_food_logs, fetch_weight_logs, fetch_workouts, get_context
-from ..services import aggregate, body_composition
+from ..services import aggregate, body_composition, deficit
 from ..services.forecast import forecast as run_forecast
 from ..services.forecast import observed_weekly_change, project_weight_series
 
@@ -194,6 +194,15 @@ async def dashboard(
             )
             for name, days in PERIOD_DAYS.items()
         },
+        "deficit": deficit.summarise(
+            maintenance_calories=maintenance,
+            target_calories=target,
+            eaten_calories=logged,
+            exercise_burn=burn_today,
+            avg_daily_net_kcal=fc.avg_daily_net_kcal,
+            days_with_data=fc.days_with_data,
+            current_weight_kg=fc.current_weight_kg,
+        ),
         "forecast": {
             "window_days": fc.window_days,
             "days_with_data": fc.days_with_data,

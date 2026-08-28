@@ -71,7 +71,7 @@ export function SectionHeader({ title, subtitle, action, icon, className }: Sect
         <div className="min-w-0">
           <h2 className="text-title-md font-medium text-md-on-surface">{title}</h2>
           {subtitle && (
-            <p className="mt-0.5 text-label-md text-md-on-surface-variant">{subtitle}</p>
+            <p className="mt-0.5 font-prose text-label-md text-md-on-surface-variant">{subtitle}</p>
           )}
         </div>
       </div>

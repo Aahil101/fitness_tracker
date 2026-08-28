@@ -120,7 +120,8 @@ export function HomeGauge({
         </div>
 
         {/* -- 4.1 Gauge -------------------------------------------------- */}
-        <div className="mx-auto max-w-lg">
+        {/* Narrower than before: it sits beside the stats panel now. */}
+        <div className="mx-auto max-w-[19rem]">
           <CalorieGauge
             logged={gauge.logged_calories}
             maintenance={gauge.maintenance_calories}

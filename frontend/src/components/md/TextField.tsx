@@ -207,7 +207,7 @@ function FieldMessage({
       id={error ? `${id}-error` : `${id}-hint`}
       role={error ? 'alert' : undefined}
       className={cn(
-        'mt-1.5 px-4 text-label-sm',
+        'mt-1.5 px-4 font-prose text-label-sm',
         error ? 'text-md-error' : 'text-md-on-surface-variant',
       )}
     >
