@@ -1,6 +1,7 @@
 export { Button, type ButtonSize, type ButtonVariant } from './Button';
 export { Badge, Chip, Segmented } from './Chip';
 export { Card, SectionHeader } from './Card';
+export { Disclosure } from './Disclosure';
 export { Blobs, EmptyState, ErrorState, LinearProgress, Skeleton } from './Feedback';
 export { Fab } from './Fab';
 export { IconButton } from './IconButton';

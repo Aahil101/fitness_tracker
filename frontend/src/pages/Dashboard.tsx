@@ -2,10 +2,12 @@ import { Dumbbell, Flame, Plus, Scale, Trash2, Utensils } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
+import { AdherenceCard } from '@/components/AdherenceCard';
 import { DeficitPanel } from '@/components/DeficitPanel';
 import { FatLossNote } from '@/components/FatLossNote';
 import { HomeBreakdown, HomeGauge } from '@/components/HomeGauge';
 import { InsightCard } from '@/components/InsightCard';
+import { WeightTrendCard } from '@/components/WeightTrendCard';
 import { LogFoodSheet } from '@/components/logging/LogFoodSheet';
 import { LogWeightDialog } from '@/components/logging/LogWeightDialog';
 import { LogWorkoutSheet } from '@/components/logging/LogWorkoutSheet';
@@ -98,7 +100,7 @@ export function Dashboard() {
         Stacked on narrow screens, stats first.
       */}
       <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr] lg:items-start">
-        <DeficitPanel data={data.deficit} />
+        <DeficitPanel data={data.deficit} expenditure={data.expenditure} />
 
         <HomeGauge
           data={data}
@@ -108,6 +110,17 @@ export function Dashboard() {
           onLogWeight={() => setWeightOpen(true)}
           unit={unit}
         />
+      </div>
+
+      {/*
+        Trend and adherence sit directly under the hero, above everything else:
+        they answer "is this working?" and "am I doing it?", which is why someone
+        opens the app. The raw totals below answer "what did I eat", which they
+        already know.
+      */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <WeightTrendCard data={data.weight_trend} unit={unit} goalKg={data.weight.goal_kg} />
+        <AdherenceCard data={data.adherence} />
       </div>
 
       {/* Intake and projection run full width: they need the room. */}

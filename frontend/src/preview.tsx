@@ -9,9 +9,12 @@
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 
+import { AdherenceCard } from './components/AdherenceCard';
 import { BodyCompositionCard } from './components/BodyCompositionCard';
 import { CalorieGauge } from './components/CalorieGauge';
-import { HomeGauge } from './components/HomeGauge';
+import { DeficitPanel } from './components/DeficitPanel';
+import { HomeBreakdown, HomeGauge } from './components/HomeGauge';
+import { WeightTrendCard } from './components/WeightTrendCard';
 import {
   Badge,
   Button,
@@ -190,11 +193,69 @@ const DASHBOARD: DashboardResponse = {
     projected_weight_30d_kg: 78.9,
     days_to_goal: 55,
     goal_date: '2026-10-21',
+    goal_date_earliest: '2026-10-02',
+    goal_date_latest: '2026-10-21',
+    goal_eta_note:
+      'Somewhere between 2 Oct and 21 Oct — your logged calories and your measured weight trend disagree by enough to move the date by 19 days.',
     confidence: 'high',
     notes: ['Time-to-goal uses your measured trend (-0.56 kg/week over 20 days).'],
   },
+  weight_trend: {
+    trend_kg: 82.4,
+    scale_kg: 82.4,
+    deviation_kg: 0,
+    noise_kg: 0.42,
+    weekly_change_kg: -0.57,
+    weekly_change_pct: -0.69,
+    rate_status: 'on_target',
+    rate_label: 'In the sweet spot',
+    rate_detail:
+      '0.69% of bodyweight a week sits inside the 0.5-1.0% band that tends to preserve muscle while the fat comes off.',
+    days_of_data: 21,
+    span_days: 20,
+    interpolated_days: 0,
+    how_calculated:
+      'Each weigh-in moves the trend 10% of the way towards itself, so water and food swings average out.',
+    series: [],
+  },
+  expenditure: {
+    maintenance_kcal: 2510,
+    formula_kcal: 2450,
+    measured_kcal: 2510,
+    source: 'measured',
+    confidence: 'high',
+    divergence_kcal: 60,
+    days_used: 28,
+    days_logged: 25,
+    logged_fraction: 0.89,
+    trust: 0.96,
+    how_calculated:
+      'Measured from your data: over 27 days your trend weight moved -2.20 kg while you logged 1,740 kcal a day.',
+    notes: [],
+    target_calories: 1900,
+    stored_target_calories: 1900,
+  },
+  adherence: {
+    days_in_window: 14,
+    days_logged: 12,
+    days_compliant: 9,
+    compliance_rate: 0.75,
+    calorie_days: 11,
+    protein_days: 9,
+    current_streak: 3,
+    best_streak: 5,
+    status: 'watch',
+    headline: 'Protein short on 3 of 12 days',
+    detail:
+      'Calories were fine on 11 days, but protein reached its floor on only 9. In a deficit that is the difference between losing fat and losing muscle.',
+    how_calculated:
+      'A day counts when calories land within 190 kcal of your 1,900 kcal target and protein reaches 135 g.',
+    weakest_link: 'protein',
+    notes: ['2 of the last 14 days have no food logged and are not counted either way.'],
+  },
   weight: {
     current_kg: 82.4,
+    trend_kg: 82.4,
     goal_kg: 78,
     starting_kg: 84,
     logged_today: true,
@@ -218,6 +279,53 @@ const GAUGE_STATES = [
   { label: 'Surplus goal (bulking)', logged: 2600, target: 2900, maintenance: 2450 },
 ];
 
+/** Every band the rate classifier can return, so the colour + label pairing
+ *  can be checked at a glance rather than reasoned about. */
+const RATE_STATES: Partial<DashboardResponse['weight_trend']>[] = [
+  {
+    rate_status: 'on_target',
+    rate_label: 'In the sweet spot',
+    weekly_change_kg: -0.57,
+    weekly_change_pct: -0.69,
+    rate_detail: '0.69% of bodyweight a week sits inside the 0.5-1.0% band.',
+  },
+  {
+    rate_status: 'gentle',
+    rate_label: 'Slow and steady',
+    weekly_change_kg: -0.25,
+    weekly_change_pct: -0.3,
+    rate_detail: '0.30% of bodyweight a week — below the usual 0.5-1.0% band.',
+  },
+  {
+    rate_status: 'rapid',
+    rate_label: 'Faster than ideal',
+    weekly_change_kg: -1.35,
+    weekly_change_pct: -1.62,
+    rate_detail: '1.62% of bodyweight a week is above 1.0%. More of the loss tends to be muscle.',
+  },
+  {
+    rate_status: 'wrong_way',
+    rate_label: 'Trending the wrong way',
+    weekly_change_kg: 0.5,
+    weekly_change_pct: 0.6,
+    rate_detail: 'Your trend is gaining 0.60% of bodyweight a week, away from your goal.',
+  },
+  {
+    rate_status: 'holding',
+    rate_label: 'Not moving yet',
+    weekly_change_kg: -0.02,
+    weekly_change_pct: -0.02,
+    rate_detail: 'Your trend is flat, within 0.1% of bodyweight a week.',
+  },
+  {
+    rate_status: 'unknown',
+    rate_label: 'Not enough weigh-ins',
+    weekly_change_kg: null,
+    weekly_change_pct: null,
+    rate_detail: 'Weigh in on a few more days and this will show how fast you are moving.',
+  },
+];
+
 export function Preview() {
   return (
     <div className="min-h-dvh bg-md-surface px-4 py-8 sm:px-6">
@@ -239,6 +347,40 @@ export function Preview() {
             onLogWeight={() => {}}
             unit="metric"
           />
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-title-lg font-medium">HomeBreakdown (intake + projection)</h2>
+          <HomeBreakdown
+            data={DASHBOARD}
+            forecastWindow={7}
+            onForecastWindowChange={() => {}}
+            onLogFood={() => {}}
+            onLogWeight={() => {}}
+            unit="metric"
+          />
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-title-lg font-medium">Measured metrics</h2>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <WeightTrendCard data={DASHBOARD.weight_trend} unit="metric" goalKg={78} />
+            <AdherenceCard data={DASHBOARD.adherence} />
+            <DeficitPanel data={DASHBOARD.deficit} expenditure={DASHBOARD.expenditure} />
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-title-lg font-medium">Rate bands</h2>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {RATE_STATES.map((state) => (
+              <WeightTrendCard
+                key={state.rate_status}
+                data={{ ...DASHBOARD.weight_trend, ...state }}
+                unit="metric"
+              />
+            ))}
+          </div>
         </section>
 
         <section>

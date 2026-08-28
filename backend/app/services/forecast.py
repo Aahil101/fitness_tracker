@@ -22,6 +22,9 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from .energy import KCAL_PER_KG
+from .trend import WeightPoint
+
+__all__ = ["DayEnergy", "Forecast", "WeightPoint", "forecast", "observed_weekly_change"]
 
 # A window needs this fraction of its days logged before we call it trustworthy.
 CONFIDENCE_THRESHOLDS = ((0.8, "high"), (0.5, "medium"))
@@ -47,12 +50,6 @@ class DayEnergy:
 
 
 @dataclass
-class WeightPoint:
-    day: date
-    weight_kg: float
-
-
-@dataclass
 class Forecast:
     window_days: int
     days_with_data: int
@@ -69,6 +66,12 @@ class Forecast:
     goal_weight_kg: float | None
     days_to_goal: int | None
     goal_date: date | None
+    #: Bounds on the goal date. A single date implies a precision this maths
+    #: does not have: the calorie estimate and the scale rarely agree, and the
+    #: gap between them is the honest width of the answer.
+    goal_date_earliest: date | None
+    goal_date_latest: date | None
+    goal_eta_note: str
     confidence: str
     notes: list[str] = field(default_factory=list)
 
@@ -117,6 +120,62 @@ def _confidence(days_with_data: int, window_days: int) -> str:
         if ratio >= threshold:
             return label
     return "low"
+
+
+def _eta_bounds(
+    *,
+    remaining: float,
+    rates: list[float | None],
+    fallback_rate: float,
+    confidence: str,
+    today: date,
+) -> tuple[date | None, date | None, str]:
+    """Bracket the goal date using the disagreement between our two rates.
+
+    The calorie arithmetic and the scale give different answers, and that gap is
+    real information: it is roughly how wrong the estimate could be. Using it as
+    the width of the range is more honest than a single date, and more honest
+    than an arbitrary +/- 20%.
+
+    When only one rate is available there is nothing to disagree with, so the
+    width comes from how much of the window was actually logged instead. Note
+    that MyFitnessPal declines to give a target date at all, on the grounds that
+    a fixed date invites an unhealthy pace. A range keeps the usefulness while
+    dropping the false precision.
+    """
+    usable = [r for r in rates if r not in (None, 0) and (remaining > 0) == (r > 0)]
+    if not usable:
+        usable = [fallback_rate] if fallback_rate else []
+    if not usable:
+        return None, None, ""
+
+    if len(usable) >= 2:
+        slowest, fastest = min(usable, key=abs), max(usable, key=abs)
+        basis = "your logged calories and your measured weight trend disagree by"
+    else:
+        # One source: widen by the confidence in it. Thin logging, wide range.
+        spread = {"high": 0.15, "medium": 0.3}.get(confidence, 0.5)
+        only = usable[0]
+        slowest, fastest = only * (1 - spread), only * (1 + spread)
+        basis = f"logging is {confidence} confidence, so the range allows"
+
+    def _days(rate: float) -> int | None:
+        if not rate:
+            return None
+        span = int(round(remaining / rate * 7))
+        return span if 0 < span <= 3650 else None
+
+    slow_days, fast_days = _days(slowest), _days(fastest)
+    if slow_days is None or fast_days is None:
+        return None, None, ""
+
+    earliest = today + timedelta(days=min(slow_days, fast_days))
+    latest = today + timedelta(days=max(slow_days, fast_days))
+    note = (
+        f"Somewhere between {earliest:%-d %b} and {latest:%-d %b} — {basis} enough to move the "
+        f"date by {abs(slow_days - fast_days)} days. Keep logging and the range narrows."
+    )
+    return earliest, latest, note
 
 
 def forecast(
@@ -174,18 +233,35 @@ def forecast(
 
     days_to_goal: int | None = None
     goal_date: date | None = None
+    earliest: date | None = None
+    latest: date | None = None
+    eta_note = ""
     if current_weight is not None and goal_weight_kg:
         remaining = goal_weight_kg - current_weight
         # Only meaningful when the trend actually points at the goal.
         if abs(remaining) < 0.1:
             days_to_goal, goal_date = 0, today
+            eta_note = "You are at your goal weight."
         elif effective_weekly != 0 and (remaining > 0) == (effective_weekly > 0):
             weeks = remaining / effective_weekly
             days_to_goal = int(round(weeks * 7))
             if 0 < days_to_goal <= 3650:
                 goal_date = today + timedelta(days=days_to_goal)
+                earliest, latest, eta_note = _eta_bounds(
+                    remaining=remaining,
+                    rates=[projected_weekly, observed_weekly],
+                    fallback_rate=effective_weekly,
+                    confidence=_confidence(len(logged_days), window_days),
+                    today=today,
+                )
             else:
                 days_to_goal = None
+                eta_note = "At the current rate the goal is too far off to date usefully."
+        else:
+            eta_note = (
+                "Your trend is not moving towards your goal at the moment, so there is no "
+                "date to give yet."
+            )
 
     return Forecast(
         window_days=window_days,
@@ -203,6 +279,9 @@ def forecast(
         goal_weight_kg=goal_weight_kg,
         days_to_goal=days_to_goal,
         goal_date=goal_date,
+        goal_date_earliest=earliest,
+        goal_date_latest=latest,
+        goal_eta_note=eta_note,
         confidence=_confidence(len(logged_days), window_days),
         notes=notes,
     )

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query
 
 from ..db import build_params, eq
 from ..deps import UserContext, fetch_food_logs, fetch_weight_logs, fetch_workouts, get_context
-from ..services import aggregate, body_composition, deficit
+from ..services import adherence, aggregate, body_composition, deficit, energy, expenditure, trend
 from ..services.forecast import forecast as run_forecast
 from ..services.forecast import observed_weekly_change, project_weight_series
 
@@ -62,6 +62,62 @@ async def _fetch_year_workouts(ctx: UserContext) -> list[dict[str, Any]]:
             ("logged_at", f"lt.{end_iso}"),
         ),
     )
+
+
+# The window the expenditure estimate reads. Four weeks is long enough for the
+# trend to outrun the noise and short enough to reflect the user's current life.
+EXPENDITURE_WINDOW_DAYS = 28
+
+# Adherence is judged over a fortnight: long enough to be a pattern, short
+# enough that last month's bad week is not still being held against you.
+ADHERENCE_WINDOW_DAYS = 14
+
+
+def _measured_energy(
+    *,
+    ctx: UserContext,
+    series: list[Any],
+    trend_state: trend.WeightTrend,
+) -> tuple[float, float, dict[str, Any]]:
+    """Maintenance measured from the logs, plus the target that follows from it.
+
+    Returns ``(maintenance, target, expenditure_block)``.
+
+    The target has to move with maintenance. The user chose a *rate* of loss, not
+    a number of calories, so when the measured expenditure comes in 200 kcal
+    below the formula's guess, holding the old target would silently halve their
+    deficit. Re-deriving it from the stored weekly deficit keeps the plan's
+    intent and puts the correction where it belongs. The same safety floors as
+    onboarding are re-applied, so a low estimate cannot produce an unsafe target.
+    """
+    intake_by_day = {d.day: d.calories_in for d in series}
+    exercise_by_day = {d.day: d.calories_out for d in series}
+    logged_days = {d.day for d in series if d.logged}
+
+    estimate = expenditure.estimate(
+        formula_maintenance=ctx.maintenance_calories,
+        trend_series=trend_state.series,
+        intake_by_day=intake_by_day,
+        exercise_by_day=exercise_by_day,
+        logged_days=logged_days,
+        window_days=EXPENDITURE_WINDOW_DAYS,
+    )
+
+    maintenance = estimate.maintenance_kcal
+    target = ctx.daily_calorie_target
+    if estimate.source != "formula":
+        weekly_deficit = ctx.goal.get("target_weekly_deficit_kcal")
+        if weekly_deficit:
+            target, _ = energy.apply_safety_floor(maintenance + float(weekly_deficit) / 7.0, maintenance)
+        else:
+            # No stored rate: preserve the deficit the old numbers expressed.
+            planned_gap = ctx.maintenance_calories - ctx.daily_calorie_target
+            target, _ = energy.apply_safety_floor(maintenance - planned_gap, maintenance)
+
+    block = estimate.to_dict()
+    block["target_calories"] = round(target, 1)
+    block["stored_target_calories"] = int(ctx.daily_calorie_target)
+    return maintenance, target, block
 
 
 def _period_stats(
@@ -138,8 +194,6 @@ async def dashboard(
     today_totals = aggregate.totals(today_logs)
     burn_today = aggregate.sum_field(today_workouts, "calories_burned")
 
-    target = ctx.daily_calorie_target
-    maintenance = ctx.maintenance_calories
     logged = today_totals["calories"]
 
     points = aggregate.weight_points(weights)
@@ -147,8 +201,18 @@ async def dashboard(
         food_rows=year_food,
         workout_rows=year_workouts,
         tz=ctx.tz,
-        start=ctx.today - timedelta(days=max(PERIOD_DAYS["month"], forecast_window) - 1),
+        start=ctx.today
+        - timedelta(
+            days=max(PERIOD_DAYS["month"], forecast_window, EXPENDITURE_WINDOW_DAYS) - 1
+        ),
         end=ctx.today,
+    )
+
+    # Smooth the scale before anything reads it: every downstream number — the
+    # rate, the expenditure estimate, the ETA — inherits the noise otherwise.
+    trend_state = trend.analyse(points=points, goal_weight_kg=ctx.goal_weight_kg)
+    maintenance, target, expenditure_block = _measured_energy(
+        ctx=ctx, series=series, trend_state=trend_state
     )
 
     fc = run_forecast(
@@ -158,6 +222,17 @@ async def dashboard(
         weight_points=points,
         goal_weight_kg=ctx.goal_weight_kg,
         today=ctx.today,
+    )
+
+    adherence_state = adherence.assess(
+        macro_days=aggregate.macro_daily_series(
+            food_rows=year_food,
+            tz=ctx.tz,
+            start=ctx.today - timedelta(days=ADHERENCE_WINDOW_DAYS - 1),
+            end=ctx.today,
+        ),
+        calorie_target=target,
+        protein_target_g=ctx.goal.get("protein_target_g"),
     )
 
     dash_observed_weekly, dash_span_days = observed_weekly_change(points)
@@ -236,6 +311,9 @@ async def dashboard(
             days_with_data=fc.days_with_data,
             current_weight_kg=fc.current_weight_kg,
         ),
+        "weight_trend": trend_state.to_dict(),
+        "expenditure": expenditure_block,
+        "adherence": adherence_state.to_dict(),
         "forecast": {
             "window_days": fc.window_days,
             "days_with_data": fc.days_with_data,
@@ -250,11 +328,17 @@ async def dashboard(
             "projected_weight_30d_kg": fc.projected_weight_30d_kg,
             "days_to_goal": fc.days_to_goal,
             "goal_date": fc.goal_date.isoformat() if fc.goal_date else None,
+            "goal_date_earliest": fc.goal_date_earliest.isoformat()
+            if fc.goal_date_earliest
+            else None,
+            "goal_date_latest": fc.goal_date_latest.isoformat() if fc.goal_date_latest else None,
+            "goal_eta_note": fc.goal_eta_note,
             "confidence": fc.confidence,
             "notes": fc.notes,
         },
         "weight": {
             "current_kg": fc.current_weight_kg,
+            "trend_kg": trend_state.trend_kg,
             "goal_kg": ctx.goal_weight_kg,
             "starting_kg": float(ctx.profile["starting_weight_kg"])
             if ctx.profile.get("starting_weight_kg")
@@ -290,8 +374,13 @@ async def analytics(
     energy_days = aggregate.daily_series(
         food_rows=food_rows, workout_rows=workout_rows, tz=ctx.tz, start=start, end=ctx.today
     )
-    maintenance = ctx.maintenance_calories
-    target = ctx.daily_calorie_target
+    points = aggregate.weight_points(weight_rows)
+    trend_state = trend.analyse(points=points, goal_weight_kg=ctx.goal_weight_kg)
+    # Same measured maintenance the dashboard uses, so the two pages cannot
+    # disagree about how many calories the user burns.
+    maintenance, target, expenditure_block = _measured_energy(
+        ctx=ctx, series=energy_days, trend_state=trend_state
+    )
 
     calorie_series = [
         {
@@ -306,9 +395,13 @@ async def analytics(
         for d in energy_days
     ]
 
-    points = aggregate.weight_points(weight_rows)
+    trend_by_day = {d.day: d.trend_kg for d in trend_state.series}
     weight_series = [
-        {"date": p.day.isoformat(), "weight_kg": p.weight_kg}
+        {
+            "date": p.day.isoformat(),
+            "weight_kg": p.weight_kg,
+            "trend_kg": trend_by_day.get(p.day),
+        }
         for p in points
         if p.day >= start
     ]
@@ -325,7 +418,7 @@ async def analytics(
     projection: list[dict[str, Any]] = []
     if points:
         projection = project_weight_series(
-            start_weight_kg=points[-1].weight_kg,
+            start_weight_kg=trend_state.trend_kg or points[-1].weight_kg,
             weekly_change_kg=fc.effective_weekly_change_kg,
             start_day=points[-1].day,
             days=min(60, max(14, days // 2)),
@@ -374,6 +467,13 @@ async def analytics(
             for bucket in ("day", "week")
         },
         "activity_breakdown": _activity_breakdown(workout_rows),
+        "weight_trend": trend_state.to_dict(),
+        "expenditure": expenditure_block,
+        "adherence": adherence.assess(
+            macro_days=macro_series[-ADHERENCE_WINDOW_DAYS:],
+            calorie_target=target,
+            protein_target_g=ctx.goal.get("protein_target_g"),
+        ).to_dict(),
         "forecast": {
             "window_days": fc.window_days,
             "days_with_data": fc.days_with_data,
@@ -384,6 +484,11 @@ async def analytics(
             "effective_weekly_change_kg": fc.effective_weekly_change_kg,
             "days_to_goal": fc.days_to_goal,
             "goal_date": fc.goal_date.isoformat() if fc.goal_date else None,
+            "goal_date_earliest": fc.goal_date_earliest.isoformat()
+            if fc.goal_date_earliest
+            else None,
+            "goal_date_latest": fc.goal_date_latest.isoformat() if fc.goal_date_latest else None,
+            "goal_eta_note": fc.goal_eta_note,
             "confidence": fc.confidence,
             "notes": fc.notes,
         },

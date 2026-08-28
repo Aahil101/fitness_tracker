@@ -114,6 +114,27 @@ def weekly_kcal_for_weight_change(weekly_change_kg: float) -> int:
     return int(round(weekly_change_kg * KCAL_PER_KG))
 
 
+def apply_safety_floor(target: float, maintenance: float) -> tuple[float, list[str]]:
+    """Clamp an eating target to the same floors ``compute_goal`` enforces.
+
+    Extracted so that a target recomputed later — when maintenance is measured
+    from real data rather than estimated from a formula — cannot bypass the
+    guards that the onboarding calculation applies. Without this, a low measured
+    expenditure would quietly produce a target below what anyone should eat.
+    """
+    warnings: list[str] = []
+    floor_by_fraction = maintenance * (1.0 - MAX_DAILY_DEFICIT_FRACTION)
+    if target < floor_by_fraction:
+        target = floor_by_fraction
+        warnings.append(
+            f"Deficit capped at {int(MAX_DAILY_DEFICIT_FRACTION * 100)}% of maintenance."
+        )
+    if target < MIN_SAFE_CALORIES:
+        target = float(MIN_SAFE_CALORIES)
+        warnings.append(f"Target raised to the {MIN_SAFE_CALORIES} kcal floor.")
+    return target, warnings
+
+
 def compute_goal(
     *,
     weight_kg: float,

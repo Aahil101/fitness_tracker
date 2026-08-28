@@ -15,22 +15,37 @@ import { ChartLegend, ChartTooltip } from './ChartKit';
 import { AXIS_PROPS, CHART_COLORS } from './chartTheme';
 
 interface WeightChartProps {
-  series: { date: string; weight_kg: number }[];
+  series: { date: string; weight_kg: number; trend_kg?: number | null }[];
   projection: { date: string; projected_kg: number }[];
   goalKg: number | null;
   unit: UnitPreference;
 }
 
 /**
- * Measured weight as a solid line, the forecast continued as a dashed line.
- * Both are merged into one dataset keyed by date so the two lines share an axis
- * and the join is continuous rather than two charts stitched together.
+ * Three channels on one axis: the raw weigh-ins, the smoothed trend through
+ * them, and the forecast continued as a dash.
+ *
+ * The trend is the line that matters — it is what the projections are built on —
+ * so it is drawn heaviest, with the raw readings demoted to faint dots scattered
+ * around it. Seeing the scatter beside the trend is the clearest possible answer
+ * to "why doesn't the app agree with my scale?", which is the question a
+ * smoothed number always provokes.
  */
 export function WeightChart({ series, projection, goalKg, unit }: WeightChartProps) {
-  const byDate = new Map<string, { date: string; actual?: number; projected?: number }>();
+  const byDate = new Map<
+    string,
+    { date: string; actual?: number; trend?: number; projected?: number }
+  >();
 
   for (const point of series) {
-    byDate.set(point.date, { date: point.date, actual: fromKg(point.weight_kg, unit) });
+    byDate.set(point.date, {
+      date: point.date,
+      actual: fromKg(point.weight_kg, unit),
+      trend:
+        point.trend_kg !== null && point.trend_kg !== undefined
+          ? fromKg(point.trend_kg, unit)
+          : undefined,
+    });
   }
   for (const point of projection) {
     const existing = byDate.get(point.date) ?? { date: point.date };
@@ -48,7 +63,9 @@ export function WeightChart({ series, projection, goalKg, unit }: WeightChartPro
     );
   }
 
-  const values = data.flatMap((row) => [row.actual, row.projected].filter((v): v is number => v !== undefined));
+  const values = data.flatMap((row) =>
+    [row.actual, row.trend, row.projected].filter((v): v is number => v !== undefined),
+  );
   const goal = goalKg !== null ? fromKg(goalKg, unit) : null;
   if (goal !== null) values.push(goal);
   const min = Math.min(...values);
@@ -90,13 +107,26 @@ export function WeightChart({ series, projection, goalKg, unit }: WeightChartPro
             />
           )}
 
+          {/* Raw readings: dots only, no connecting line. Joining them draws a
+              zigzag that is mostly water and invites the user to read meaning
+              into noise. */}
           <Line
             type="monotone"
             dataKey="actual"
-            name="Weight"
+            name="Scale reading"
+            stroke="transparent"
+            strokeWidth={0}
+            dot={{ r: 2.5, strokeWidth: 0, fill: CHART_COLORS.axis, fillOpacity: 0.55 }}
+            activeDot={{ r: 5, fill: CHART_COLORS.axis }}
+            connectNulls={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="trend"
+            name="Trend"
             stroke={CHART_COLORS.primary}
             strokeWidth={2.5}
-            dot={{ r: 2.5, strokeWidth: 0, fill: CHART_COLORS.primary }}
+            dot={false}
             activeDot={{ r: 5 }}
             connectNulls
           />
@@ -116,7 +146,8 @@ export function WeightChart({ series, projection, goalKg, unit }: WeightChartPro
       <ChartLegend
         className="mt-2 justify-center"
         items={[
-          { label: 'Measured', color: CHART_COLORS.primary },
+          { label: 'Trend', color: CHART_COLORS.primary },
+          { label: 'Scale readings', color: CHART_COLORS.axis },
           { label: 'Projected from calorie balance', color: CHART_COLORS.in, dashed: true },
           ...(goal !== null ? [{ label: 'Goal weight', color: CHART_COLORS.marker, dashed: true }] : []),
         ]}

@@ -1,4 +1,4 @@
-import { Activity, Dumbbell, Scale, TrendingDown, TrendingUp } from 'lucide-react';
+import { Activity, Dumbbell, Flame, Scale, Target, TrendingDown, TrendingUp } from 'lucide-react';
 import { useState } from 'react';
 
 import { CaloriesInOutChart, NetBalanceChart } from '@/components/charts/CalorieChart';
@@ -9,6 +9,7 @@ import { WeightChart } from '@/components/charts/WeightChart';
 import {
   Badge,
   Card,
+  Disclosure,
   ErrorState,
   SectionHeader,
   Segmented,
@@ -17,6 +18,33 @@ import {
 import { useAnalytics, useMe } from '@/hooks/queries';
 import { durationLabel, kcal, signedKcal, weightDelta } from '@/lib/format';
 import type { ForecastWindow } from '@/lib/types';
+
+type StatTone = 'neutral' | 'success' | 'warning' | 'error' | 'info';
+
+const TONE_CLASS: Record<StatTone, string> = {
+  neutral: 'text-md-on-surface',
+  success: 'text-md-success',
+  warning: 'text-md-warning',
+  error: 'text-md-error',
+  info: 'text-md-info',
+};
+
+/** Rate band -> colour. Always paired with the written label from the backend. */
+const RATE_TONE: Record<string, StatTone> = {
+  on_target: 'success',
+  gentle: 'info',
+  holding: 'neutral',
+  rapid: 'warning',
+  wrong_way: 'error',
+  unknown: 'neutral',
+};
+
+const ADHERENCE_TONE: Record<string, StatTone> = {
+  good: 'success',
+  watch: 'warning',
+  risk: 'error',
+  unknown: 'neutral',
+};
 
 const RANGE_OPTIONS = [
   { value: 14, label: '14d' },
@@ -60,6 +88,7 @@ export function Analytics() {
   }
 
   const { forecast, macro_averages: averages, macro_totals: totals } = data;
+  const trendState = data.weight_trend;
   const losing = forecast.effective_weekly_change_kg < 0;
 
   return (
@@ -84,7 +113,7 @@ export function Analytics() {
       </div>
 
       {/* Headline numbers */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
           label="Avg daily intake"
           value={`${kcal(averages.calories)}`}
@@ -108,17 +137,46 @@ export function Analytics() {
         <StatCard
           label="Measured change"
           value={
-            forecast.observed_weekly_change_kg !== null
-              ? weightDelta(forecast.observed_weekly_change_kg, unit)
+            trendState.weekly_change_kg !== null
+              ? weightDelta(trendState.weekly_change_kg, unit)
               : '—'
           }
           unit="per week"
           hint={
-            forecast.observed_span_days
-              ? `${forecast.observed_span_days} days of weigh-ins`
-              : 'needs 3+ weigh-ins'
+            trendState.weekly_change_pct !== null
+              ? `${Math.abs(trendState.weekly_change_pct).toFixed(2)}% of bodyweight · ${trendState.rate_label.toLowerCase()}`
+              : 'needs a week of weigh-ins'
           }
+          tone={RATE_TONE[trendState.rate_status]}
           icon={<Scale size={16} />}
+        />
+        <StatCard
+          label="Days on plan"
+          value={
+            data.adherence.compliance_rate !== null
+              ? `${data.adherence.days_compliant}/${data.adherence.days_logged}`
+              : '—'
+          }
+          unit={`last ${data.adherence.days_in_window} days`}
+          hint={data.adherence.headline}
+          tone={ADHERENCE_TONE[data.adherence.status]}
+          icon={<Target size={16} />}
+        />
+        <StatCard
+          label="Maintenance"
+          value={kcal(data.expenditure.maintenance_kcal)}
+          unit="kcal/day"
+          hint={
+            data.expenditure.source === 'formula'
+              ? 'estimated from your stats'
+              : `measured from your logs${
+                  data.expenditure.divergence_kcal
+                    ? ` · ${signedKcal(data.expenditure.divergence_kcal)} vs the formula`
+                    : ''
+                }`
+          }
+          tone={data.expenditure.source === 'formula' ? 'neutral' : 'success'}
+          icon={<Flame size={16} />}
         />
       </div>
 
@@ -126,7 +184,7 @@ export function Analytics() {
       <Card tone="container">
         <ChartFrame
           title="Weight trend"
-          subtitle="Solid is what you weighed; dashed is where your calorie balance points."
+          subtitle="Dots are what the scale said; the line is the trend through them; dashed is where your calorie balance points."
           height={300}
           action={
             <Segmented
@@ -155,6 +213,18 @@ export function Analytics() {
             ))}
           </ul>
         )}
+
+        {forecast.goal_eta_note && (
+          <p className="mt-2 font-prose text-label-sm text-md-on-surface-variant">
+            {forecast.goal_eta_note}
+          </p>
+        )}
+
+        {/* The chart now shows a smoothed line, which always prompts the same
+            question from anyone who has just stood on their scale. */}
+        <Disclosure label="Why doesn't this match my scale?">
+          {trendState.how_calculated}
+        </Disclosure>
       </Card>
 
       {/* Calories in vs out */}
@@ -253,11 +323,10 @@ function StatCard({
   value: string;
   unit?: string;
   hint?: string;
-  tone?: 'neutral' | 'success' | 'warning';
+  tone?: StatTone;
   icon?: React.ReactNode;
 }) {
-  const valueTone =
-    tone === 'success' ? 'text-md-success' : tone === 'warning' ? 'text-md-warning' : 'text-md-on-surface';
+  const valueTone = TONE_CLASS[tone];
 
   return (
     <Card tone="container" className="p-4 sm:p-5">

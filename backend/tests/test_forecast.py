@@ -146,3 +146,85 @@ def test_projection_series_is_a_straight_line_from_the_last_point():
     ]
     assert series[1]["projected_kg"] == 79.3
     assert series[2]["projected_kg"] == 78.6
+
+
+
+class TestGoalDateRange:
+    """A single date claims a precision this arithmetic does not have.
+
+    MyFitnessPal declines to give a target date at all, reasoning that a fixed
+    date invites an unhealthy pace. A range keeps the usefulness without the
+    false confidence, and its width is the disagreement between our two rates.
+    """
+
+    def _losing(self, *, weight_kg: float = 85.0, per_day: float = -0.08, days: int = 21):
+        return [
+            WeightPoint(day=TODAY - timedelta(days=days - 1 - i), weight_kg=weight_kg + per_day * i)
+            for i in range(days)
+        ]
+
+    def test_range_brackets_the_point_estimate(self):
+        result = forecast(
+            days=make_days(14, 1600.0),
+            maintenance_calories=2400.0,
+            window_days=14,
+            weight_points=self._losing(),
+            goal_weight_kg=78.0,
+            today=TODAY,
+        )
+        assert result.goal_date is not None
+        assert result.goal_date_earliest is not None
+        assert result.goal_date_latest is not None
+        assert result.goal_date_earliest <= result.goal_date_latest
+        assert result.goal_date_earliest <= result.goal_date <= result.goal_date_latest
+        assert result.goal_eta_note
+
+    def test_the_range_has_width_when_the_two_rates_disagree(self):
+        """Calories say one thing, the scale says another: that gap is the width."""
+        result = forecast(
+            days=make_days(14, 1200.0),  # a large paper deficit
+            maintenance_calories=2400.0,
+            window_days=14,
+            weight_points=self._losing(per_day=-0.02),  # but the scale barely moves
+            goal_weight_kg=78.0,
+            today=TODAY,
+        )
+        if result.goal_date_earliest and result.goal_date_latest:
+            assert result.goal_date_latest > result.goal_date_earliest
+
+    def test_no_range_when_the_trend_points_away_from_the_goal(self):
+        result = forecast(
+            days=make_days(14, 3000.0),
+            maintenance_calories=2400.0,
+            window_days=14,
+            weight_points=self._losing(per_day=0.05),  # gaining
+            goal_weight_kg=78.0,
+            today=TODAY,
+        )
+        assert result.days_to_goal is None
+        assert result.goal_date_earliest is None
+        assert "not moving towards" in result.goal_eta_note
+
+    def test_reaching_the_goal_is_stated_plainly(self):
+        result = forecast(
+            days=make_days(14, 1600.0),
+            maintenance_calories=2400.0,
+            window_days=14,
+            weight_points=[WeightPoint(day=TODAY, weight_kg=78.0)],
+            goal_weight_kg=78.0,
+            today=TODAY,
+        )
+        assert result.days_to_goal == 0
+        assert "at your goal" in result.goal_eta_note
+
+    def test_no_goal_weight_means_no_eta_and_no_crash(self):
+        result = forecast(
+            days=make_days(14, 1600.0),
+            maintenance_calories=2400.0,
+            window_days=14,
+            weight_points=self._losing(),
+            goal_weight_kg=None,
+            today=TODAY,
+        )
+        assert result.goal_date is None
+        assert result.goal_date_earliest is None

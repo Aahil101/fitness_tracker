@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 # ---------------------------------------------------------------------------
@@ -345,3 +346,91 @@ def test_chat_history_endpoints(client: TestClient):
     assert "session" in messages.json()
 
     assert client.get("/api/chat/suggestions").json()["prompts"]
+
+
+
+class TestMeasuredMetrics:
+    """The new blocks, checked against the known fixture rows.
+
+    The fixture logs 3 meals a day for 10 days against a 1900 kcal target and
+    2450 kcal maintenance, and carries 21 daily weigh-ins falling 0.08 kg/day.
+    """
+
+    def test_dashboard_exposes_the_trend_alongside_the_raw_reading(self, client: TestClient):
+        body = client.get("/api/dashboard").json()
+        trend = body["weight_trend"]
+        # 0.08 kg/day is 0.56 kg/week. The trend must recover it, not a shallower
+        # figure: understating progress is how a working diet looks like a failure.
+        assert trend["weekly_change_kg"] == pytest.approx(-0.56, abs=0.06)
+        assert trend["rate_status"] in {"gentle", "on_target", "rapid"}
+        assert trend["rate_label"] and trend["rate_detail"]
+        # Percentage of bodyweight, because that is the form the guidance takes.
+        assert trend["weekly_change_pct"] == pytest.approx(
+            trend["weekly_change_kg"] / trend["trend_kg"] * 100, abs=0.02
+        )
+        # Both numbers stay available; the trend does not replace the scale.
+        assert body["weight"]["trend_kg"] is not None
+        assert body["weight"]["current_kg"] is not None
+
+    def test_expenditure_falls_back_to_the_formula_on_patchy_logging(
+        self, client: TestClient
+    ):
+        """10 logged days inside a 28-day window is too thin to measure from."""
+        body = client.get("/api/dashboard").json()
+        exp = body["expenditure"]
+        assert exp["source"] == "formula"
+        assert exp["maintenance_kcal"] == pytest.approx(2450.0)
+        assert exp["measured_kcal"] is None
+        assert exp["notes"], "should say what would unlock a measured figure"
+        assert exp["how_calculated"]
+
+    def test_maintenance_agrees_across_every_block_that_shows_it(
+        self, client: TestClient
+    ):
+        """The gauge arc, the deficit panel and the analytics page cannot disagree."""
+        dash = client.get("/api/dashboard").json()
+        analytics = client.get("/api/analytics").json()
+        maintenance = dash["expenditure"]["maintenance_kcal"]
+        assert dash["gauge"]["maintenance_calories"] == pytest.approx(maintenance, abs=1)
+        assert dash["deficit"]["maintenance_calories"] == pytest.approx(maintenance, abs=1)
+        assert analytics["targets"]["maintenance_calories"] == pytest.approx(maintenance, abs=1)
+        assert analytics["expenditure"]["maintenance_kcal"] == pytest.approx(maintenance, abs=1)
+
+    def test_adherence_grades_the_plan_not_the_typing(self, client: TestClient):
+        """The fixture eats ~1620 against a 1900 target, so days are under, not on."""
+        body = client.get("/api/dashboard").json()
+        adherence = body["adherence"]
+        assert adherence["days_logged"] > 0
+        assert adherence["days_compliant"] == 0
+        assert adherence["weakest_link"] == "calories"
+        assert "under" in adherence["headline"].lower()
+        # Rate is over logged days, never over the whole window.
+        assert adherence["compliance_rate"] == pytest.approx(
+            adherence["days_compliant"] / adherence["days_logged"]
+        )
+        assert adherence["how_calculated"]
+
+    def test_goal_eta_is_a_range(self, client: TestClient):
+        body = client.get("/api/dashboard").json()
+        fc = body["forecast"]
+        if fc["goal_date"]:
+            assert fc["goal_date_earliest"] <= fc["goal_date"] <= fc["goal_date_latest"]
+            assert fc["goal_eta_note"]
+
+    def test_analytics_weight_series_carries_the_trend_channel(self, client: TestClient):
+        body = client.get("/api/analytics").json()
+        assert body["weight_series"], "fixture has weigh-ins"
+        for point in body["weight_series"]:
+            assert set(point) == {"date", "weight_kg", "trend_kg"}
+        # The projection must start from the trend, not from the last raw reading,
+        # or the forecast line jumps by whatever water the user was carrying.
+        assert body["weight_projection"]
+        first = body["weight_projection"][0]["projected_kg"]
+        assert first == pytest.approx(body["weight_trend"]["trend_kg"], abs=0.2)
+
+    def test_every_new_block_ships_an_explanation(self, client: TestClient):
+        """Trust requires that a user can find out where a number came from."""
+        body = client.get("/api/dashboard").json()
+        assert body["weight_trend"]["how_calculated"]
+        assert body["expenditure"]["how_calculated"]
+        assert body["adherence"]["how_calculated"]

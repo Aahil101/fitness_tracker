@@ -102,6 +102,63 @@ export interface PeriodStats {
   fiber_g: number;
 }
 
+/** Weight with the daily water and gut-content noise taken out. */
+export interface WeightTrend {
+  trend_kg: number | null;
+  scale_kg: number | null;
+  /** Latest reading minus the trend — the number that justifies ignoring the scale. */
+  deviation_kg: number | null;
+  /** How much this user's readings typically scatter. */
+  noise_kg: number | null;
+  weekly_change_kg: number | null;
+  /** As a share of bodyweight, which is the form the safe-rate guidance takes. */
+  weekly_change_pct: number | null;
+  rate_status: 'unknown' | 'holding' | 'gentle' | 'on_target' | 'rapid' | 'wrong_way';
+  rate_label: string;
+  rate_detail: string;
+  days_of_data: number;
+  span_days: number;
+  interpolated_days: number;
+  how_calculated: string;
+  series: { date: string; trend_kg: number; scale_kg: number | null }[];
+}
+
+/** Maintenance calories, and where the figure came from. */
+export interface Expenditure {
+  maintenance_kcal: number;
+  formula_kcal: number;
+  measured_kcal: number | null;
+  source: 'formula' | 'blended' | 'measured';
+  confidence: 'low' | 'medium' | 'high';
+  divergence_kcal: number | null;
+  days_used: number;
+  days_logged: number;
+  logged_fraction: number;
+  trust: number;
+  how_calculated: string;
+  notes: string[];
+  target_calories: number;
+  stored_target_calories: number;
+}
+
+/** Whether the plan was followed, as distinct from whether it was typed in. */
+export interface Adherence {
+  days_in_window: number;
+  days_logged: number;
+  days_compliant: number;
+  compliance_rate: number | null;
+  calorie_days: number;
+  protein_days: number;
+  current_streak: number;
+  best_streak: number;
+  status: 'unknown' | 'good' | 'watch' | 'risk';
+  headline: string;
+  detail: string;
+  how_calculated: string;
+  weakest_link: 'calories' | 'protein' | 'logging' | 'none';
+  notes: string[];
+}
+
 export interface GaugeState {
   logged_calories: number;
   maintenance_calories: number;
@@ -129,6 +186,10 @@ export interface ForecastState {
   projected_weight_30d_kg: number | null;
   days_to_goal: number | null;
   goal_date: string | null;
+  /** Bounds on the goal date. A single date implies precision we do not have. */
+  goal_date_earliest: string | null;
+  goal_date_latest: string | null;
+  goal_eta_note: string;
   confidence: 'low' | 'medium' | 'high';
   notes: string[];
 }
@@ -170,9 +231,13 @@ export interface DashboardResponse {
   periods: Record<PeriodKey, PeriodStats>;
   deficit: DeficitSummary;
   body_composition: BodyComposition;
+  weight_trend: WeightTrend;
+  expenditure: Expenditure;
+  adherence: Adherence;
   forecast: ForecastState;
   weight: {
     current_kg: number | null;
+    trend_kg: number | null;
     goal_kg: number | null;
     starting_kg: number | null;
     logged_today: boolean;
@@ -235,7 +300,7 @@ export interface BodyComposition {
 export interface AnalyticsResponse {
   range: { from: string; to: string; days: number };
   calorie_series: CaloriePoint[];
-  weight_series: { date: string; weight_kg: number }[];
+  weight_series: { date: string; weight_kg: number; trend_kg: number | null }[];
   weight_projection: { date: string; projected_kg: number }[];
   macro_series: MacroPoint[];
   macro_totals: Record<'protein_g' | 'carbs_g' | 'fat_g' | 'fiber_g', number>;
@@ -250,6 +315,9 @@ export interface AnalyticsResponse {
   }[];
   forecast: ForecastState & { observed_span_days: number };
   body_composition: BodyComposition;
+  weight_trend: WeightTrend;
+  expenditure: Expenditure;
+  adherence: Adherence;
   targets: { daily_calorie_target: number; maintenance_calories: number };
 }
 

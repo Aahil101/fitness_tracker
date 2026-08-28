@@ -1,10 +1,10 @@
 import { Flame, TrendingDown } from 'lucide-react';
 
-import { Card } from '@/components/md';
+import { Card, Disclosure } from '@/components/md';
 import { useCountUp } from '@/hooks/useCountUp';
 import { cn } from '@/lib/cn';
 import { kcal } from '@/lib/format';
-import type { DeficitSummary } from '@/lib/types';
+import type { DeficitSummary, Expenditure } from '@/lib/types';
 
 /**
  * Today's energy accounting, in the order it makes sense to read:
@@ -15,7 +15,13 @@ import type { DeficitSummary } from '@/lib/types';
  * rather than a goal, green for the intake allowance, red for exercise burn,
  * blue for the resulting deficit.
  */
-export function DeficitPanel({ data }: { data: DeficitSummary }) {
+export function DeficitPanel({
+  data,
+  expenditure,
+}: {
+  data: DeficitSummary;
+  expenditure?: Expenditure;
+}) {
   const { progress_fraction: progress } = data;
   const beyondPlan = progress > 1;
   const shownProgress = useCountUp(progress * 100);
@@ -38,7 +44,13 @@ export function DeficitPanel({ data }: { data: DeficitSummary }) {
         <Stat
           label="To maintain"
           value={data.maintenance_calories}
-          hint="Burned just existing"
+          hint={
+            expenditure?.source === 'measured'
+              ? 'Measured from your logs'
+              : expenditure?.source === 'blended'
+                ? 'Part measured, part estimated'
+                : 'Estimated from your stats'
+          }
           className="text-md-on-surface"
         />
         <Stat
@@ -128,6 +140,17 @@ export function DeficitPanel({ data }: { data: DeficitSummary }) {
           </p>
         )}
       </div>
+
+      {/*
+        Every figure above is derived from the maintenance number, so that is the
+        one worth explaining. Where it came from decides whether the whole panel
+        is measurement or guesswork, and the user cannot tell by looking.
+      */}
+      {expenditure && (
+        <Disclosure label="Where does 'to maintain' come from?">
+          {expenditure.how_calculated}
+        </Disclosure>
+      )}
     </Card>
   );
 }

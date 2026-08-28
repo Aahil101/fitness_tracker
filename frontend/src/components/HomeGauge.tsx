@@ -45,6 +45,14 @@ const WINDOW_OPTIONS: { value: ForecastWindow; label: string }[] = [
   { value: 30, label: '30d' },
 ];
 
+/** "12 Oct" — enough to plan around, not so much that it implies certainty. */
+function shortDate(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
 const CONFIDENCE_TONE = {
   high: 'success',
   medium: 'info',
@@ -258,22 +266,32 @@ export function HomeBreakdown({
           </p>
         )}
 
+        {/*
+          A range, not a date. The calorie estimate and the scale rarely agree,
+          and the gap between them is the honest width of the answer — quoting a
+          single day implies a precision this arithmetic does not have.
+        */}
         {forecast.days_to_goal !== null && weight.goal_kg !== null && (
           <p className="mt-2 text-label-md text-md-on-surface-variant">
             {forecast.days_to_goal === 0
               ? 'You are at your goal weight.'
               : `~${forecast.days_to_goal} days to ${weight.goal_kg} ${weightUnitLabel(unit)}`}
-            {forecast.goal_date && forecast.days_to_goal > 0 && (
+            {forecast.days_to_goal > 0 && (
               <span className="text-md-on-surface-variant/80">
                 {' '}
-                (around{' '}
-                {new Date(`${forecast.goal_date}T12:00:00`).toLocaleDateString(undefined, {
-                  month: 'short',
-                  year: 'numeric',
-                })}
-                )
+                {forecast.goal_date_earliest && forecast.goal_date_latest
+                  ? `(between ${shortDate(forecast.goal_date_earliest)} and ${shortDate(forecast.goal_date_latest)})`
+                  : forecast.goal_date
+                    ? `(around ${shortDate(forecast.goal_date)})`
+                    : ''}
               </span>
             )}
+          </p>
+        )}
+
+        {forecast.goal_eta_note && (
+          <p className="mt-1 font-prose text-label-sm text-md-on-surface-variant/80">
+            {forecast.goal_eta_note}
           </p>
         )}
 
