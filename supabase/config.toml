@@ -1,0 +1,17 @@
+project_id = "hoahlhknjjfoketgqkul"
+
+[auth]
+site_url = "https://frontend-nine-mu-goi9olqbjw.vercel.app"
+additional_redirect_urls = [
+  "https://frontend-nine-mu-goi9olqbjw.vercel.app",
+  "https://frontend-nine-mu-goi9olqbjw.vercel.app/",
+]
+
+[auth.email]
+# Confirmation is disabled in the dashboard; mirrored here so a config push
+# does not silently re-enable it.
+enable_confirmations = false
+# Pinned to the values already live on the remote project so pushing the
+# redirect URLs does not drift unrelated OTP settings.
+max_frequency = "1m0s"
+otp_length = 8
