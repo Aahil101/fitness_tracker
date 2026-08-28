@@ -26,6 +26,7 @@ import {
 } from '@/components/md';
 import {
   useDeleteFoodLog,
+  useRestoreFoodLog,
   useDeleteWorkout,
   useFoodLogs,
   useMe,
@@ -61,6 +62,7 @@ export function Diary() {
   const workouts = useWorkouts(day, day);
   const weights = useWeights(365);
   const deleteFood = useDeleteFoodLog();
+  const restoreFood = useRestoreFoodLog();
   const deleteWorkout = useDeleteWorkout();
 
   const unit = me.data?.profile.unit_preference ?? 'metric';
@@ -251,10 +253,14 @@ export function Diary() {
                         aria-label={`Delete ${log.food_name}`}
                         onClick={() =>
                           deleteFood.mutate(log.id, {
-                            onSuccess: () => toast.success('Entry removed.'),
+                            onSuccess: (result) =>
+                              toast.show(`${log.food_name} removed.`, 'success', {
+                                label: 'Undo',
+                                onClick: () => restoreFood.mutate(result.deleted),
+                              }),
                           })
                         }
-                        className="shrink-0 rounded-full p-2 text-md-on-surface-variant opacity-0 transition-all hover:bg-md-error/10 hover:text-md-error focus-visible:opacity-100 group-hover:opacity-100"
+                        className="shrink-0 rounded-full p-2 text-md-on-surface-variant/70 transition-all hover:bg-md-error/10 hover:text-md-error focus-visible:text-md-error"
                       >
                         <Trash2 size={15} />
                       </button>
@@ -321,8 +327,8 @@ export function Diary() {
                     })
                   }
                   className={cn(
-                    'shrink-0 rounded-full p-2 text-md-on-surface-variant opacity-0 transition-all',
-                    'hover:bg-md-error/10 hover:text-md-error focus-visible:opacity-100 group-hover:opacity-100',
+                    'shrink-0 rounded-full p-2 text-md-on-surface-variant/70 transition-all',
+                    'hover:bg-md-error/10 hover:text-md-error focus-visible:text-md-error',
                   )}
                 >
                   <Trash2 size={15} />

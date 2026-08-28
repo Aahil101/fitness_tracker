@@ -19,7 +19,13 @@ import {
   Skeleton,
   useToast,
 } from '@/components/md';
-import { useDashboard, useDeleteFoodLog, useDeleteWorkout, useMe } from '@/hooks/queries';
+import {
+  useDashboard,
+  useDeleteFoodLog,
+  useDeleteWorkout,
+  useMe,
+  useRestoreFoodLog,
+} from '@/hooks/queries';
 import { cn } from '@/lib/cn';
 import { durationLabel, greeting, firstName, kcal, MEAL_LABELS, timeOfDay } from '@/lib/format';
 import type { ForecastWindow } from '@/lib/types';
@@ -37,6 +43,7 @@ export function Dashboard() {
   const [workoutOpen, setWorkoutOpen] = useState(false);
 
   const deleteFood = useDeleteFoodLog();
+  const restoreFood = useRestoreFoodLog();
   const deleteWorkout = useDeleteWorkout();
 
   // PWA shortcuts land here with ?action=…
@@ -178,12 +185,16 @@ export function Dashboard() {
                         aria-label={`Delete ${log.food_name}`}
                         onClick={() => {
                           deleteFood.mutate(log.id, {
-                            onSuccess: () => toast.success('Entry removed.'),
+                            onSuccess: (result) =>
+                              toast.show(`${log.food_name} removed.`, 'success', {
+                                label: 'Undo',
+                                onClick: () => restoreFood.mutate(result.deleted),
+                              }),
                             onError: (caught) =>
                               toast.error(caught instanceof Error ? caught.message : 'Delete failed.'),
                           });
                         }}
-                        className="shrink-0 rounded-full p-2 text-md-on-surface-variant opacity-0 transition-all duration-short hover:bg-md-error/10 hover:text-md-error focus-visible:opacity-100 group-hover:opacity-100"
+                        className="shrink-0 rounded-full p-2 text-md-on-surface-variant/70 transition-all hover:bg-md-error/10 hover:text-md-error focus-visible:text-md-error duration-short"
                       >
                         <Trash2 size={15} />
                       </button>
@@ -247,7 +258,7 @@ export function Dashboard() {
                       onSuccess: () => toast.success('Workout removed.'),
                     });
                   }}
-                  className="shrink-0 rounded-full p-2 text-md-on-surface-variant opacity-0 transition-all duration-short hover:bg-md-error/10 hover:text-md-error focus-visible:opacity-100 group-hover:opacity-100"
+                  className="shrink-0 rounded-full p-2 text-md-on-surface-variant/70 transition-all hover:bg-md-error/10 hover:text-md-error focus-visible:text-md-error duration-short"
                 >
                   <Trash2 size={15} />
                 </button>
