@@ -1,8 +1,12 @@
 project_id = "hoahlhknjjfoketgqkul"
 
 [auth]
-site_url = "https://frontend-nine-mu-goi9olqbjw.vercel.app"
+# Canonical production alias; the second alias is the project's auto-generated
+# production domain and stays allowed so either URL works.
+site_url = "https://frontend-fitness-575c.vercel.app"
 additional_redirect_urls = [
+  "https://frontend-fitness-575c.vercel.app",
+  "https://frontend-fitness-575c.vercel.app/",
   "https://frontend-nine-mu-goi9olqbjw.vercel.app",
   "https://frontend-nine-mu-goi9olqbjw.vercel.app/",
 ]
