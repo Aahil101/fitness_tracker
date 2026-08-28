@@ -19,7 +19,12 @@ import { cn } from '@/lib/cn';
 const FIELD_SHELL =
   'group relative flex w-full flex-col rounded-t-sm border-b-2 bg-md-surface-container-low px-4 transition-colors duration-short ease-md';
 
-const FIELD_BORDER = 'border-md-outline-variant focus-within:border-md-primary hover:border-md-outline';
+// Hover is scoped to the unfocused state on purpose. Tailwind emits `hover:`
+// after `focus-within:`, so a plain `hover:border-md-outline` would win while the
+// cursor rests on a focused field and leave the underline grey instead of
+// primary — exactly when the focus state most needs to read clearly.
+const FIELD_BORDER =
+  'border-md-outline-variant [&:hover:not(:focus-within)]:border-md-outline focus-within:border-md-primary';
 
 interface BaseProps {
   label: string;

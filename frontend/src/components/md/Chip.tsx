@@ -107,7 +107,7 @@ const BADGE_TONES = {
   success: 'bg-md-success-container text-md-on-success-container',
   warning: 'bg-md-warning-container text-md-on-warning-container',
   error: 'bg-md-error-container text-md-on-error-container',
-  info: 'bg-md-secondary-container text-md-on-secondary-container',
+  info: 'bg-md-info-container text-md-on-info-container',
 } as const;
 
 export function Badge({ tone = 'neutral', icon, children, className }: BadgeProps) {

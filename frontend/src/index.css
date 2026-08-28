@@ -41,17 +41,31 @@
     --md-tertiary-container: 255 216 228;
     --md-on-tertiary-container: 49 17 29;
 
-    /* Feedback */
-    --md-error: 179 38 30;
-    --md-on-error: 255 255 255;
-    --md-error-container: 249 222 220;
-    --md-on-error-container: 65 14 11;
-    --md-success: 30 121 82;
-    --md-success-container: 205 237 219;
-    --md-on-success-container: 3 47 30;
-    --md-warning: 158 106 15;
-    --md-warning-container: 252 231 199;
-    --md-on-warning-container: 62 40 2;
+    /*
+     * Feedback palette: #ed6a5f red, #f4bf4f yellow, #61c454 green, #007AFF blue.
+     *
+     * The accent tokens sit as close to those hexes as contrast allows, since
+     * they are used for 15px icons and small labels that need 3:1 against the
+     * surface. Red, green and blue clear that essentially as given. Yellow
+     * cannot — #f4bf4f on white is about 1.6:1, invisible — so the light-theme
+     * accent is the same hue darkened to 3:1, while dark mode uses the exact
+     * value. Containers are tints of the source colour with their on- pairs
+     * checked to 7:1.
+     */
+    --md-error: 235 105 94;
+    --md-on-error: 0 0 0;
+    --md-error-container: 252 228 226;
+    --md-on-error-container: 123 55 49;
+    --md-success: 81 165 71;
+    --md-success-container: 227 244 224;
+    --md-on-success-container: 45 90 39;
+    --md-warning: 178 139 58;
+    --md-warning-container: 253 243 223;
+    --md-on-warning-container: 100 78 32;
+    --md-info: 0 122 255;
+    --md-on-info: 255 255 255;
+    --md-info-container: 209 231 255;
+    --md-on-info-container: 0 72 150;
 
     /* Outlines */
     --md-outline: 121 116 126; /* #79747E */
@@ -109,16 +123,21 @@
     --md-tertiary-container: 99 59 72;
     --md-on-tertiary-container: 255 216 228;
 
-    --md-error: 242 184 181;
-    --md-on-error: 96 20 16;
-    --md-error-container: 140 29 24;
-    --md-on-error-container: 249 222 220;
-    --md-success: 118 216 168;
-    --md-success-container: 20 79 55;
-    --md-on-success-container: 190 236 213;
-    --md-warning: 240 189 116;
-    --md-warning-container: 92 62 6;
-    --md-on-warning-container: 252 231 199;
+    /* Dark surfaces take the requested values as given: all four clear 4.5:1. */
+    --md-error: 237 106 95;
+    --md-on-error: 0 0 0;
+    --md-error-container: 90 40 36;
+    --md-on-error-container: 247 185 180;
+    --md-success: 97 196 84;
+    --md-success-container: 37 74 32;
+    --md-on-success-container: 181 227 175;
+    --md-warning: 244 191 79;
+    --md-warning-container: 93 73 30;
+    --md-on-warning-container: 251 230 186;
+    --md-info: 13 129 255;
+    --md-on-info: 0 0 0;
+    --md-info-container: 0 46 97;
+    --md-on-info-container: 135 192 255;
 
     --md-outline: 147 143 153;
     --md-outline-variant: 73 69 79;
@@ -164,6 +183,22 @@
 
   :focus-visible {
     @apply outline-none ring-2 ring-md-primary ring-offset-2 ring-offset-md-surface;
+  }
+
+  /*
+   * Text entry is exempt from the global ring. Browsers match :focus-visible on
+   * text inputs even when they are clicked rather than tabbed to, so the ring
+   * appeared on every click — an offset rectangle fighting the filled field's
+   * rounded-top, square-bottom shape.
+   *
+   * Accessibility is preserved because these fields carry their own visible
+   * focus state: the 2px bottom border and the label both turn primary. Anything
+   * without that affordance (buttons, links, checkboxes, radios) keeps the ring.
+   */
+  input:not([type='checkbox']):not([type='radio']):focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    @apply ring-0 ring-offset-0;
   }
 
   ::selection {

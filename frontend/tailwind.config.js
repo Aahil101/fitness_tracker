@@ -63,6 +63,10 @@ export default {
           warning: token('--md-warning'),
           'warning-container': token('--md-warning-container'),
           'on-warning-container': token('--md-on-warning-container'),
+          info: token('--md-info'),
+          'on-info': token('--md-on-info'),
+          'info-container': token('--md-info-container'),
+          'on-info-container': token('--md-on-info-container'),
 
           // Outlines
           outline: token('--md-outline'),

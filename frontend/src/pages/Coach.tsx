@@ -282,7 +282,7 @@ export function Coach() {
 
         {/* -- Composer -------------------------------------------------- */}
         <div className="border-t border-md-outline-variant/50 p-4">
-          <div className="flex items-end gap-2 rounded-lg bg-md-surface-container-low p-2">
+          <div className="flex items-end gap-2 rounded-lg bg-md-surface-container-low p-2 ring-1 ring-transparent transition-colors duration-short focus-within:ring-md-primary">
             <textarea
               ref={inputRef}
               value={draft}
