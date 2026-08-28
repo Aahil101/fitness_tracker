@@ -60,19 +60,11 @@ const CONFIDENCE_TONE = {
  */
 export function HomeGauge({
   data,
-  forecastWindow,
-  onForecastWindowChange,
   onLogFood,
   onLogWeight,
-  unit = 'metric',
 }: HomeGaugeProps) {
-  const [period, setPeriod] = useState<PeriodKey>('week');
-
-  const { gauge, forecast, periods, weight, today } = data;
-  const stats = periods[period];
+  const { gauge, weight } = data;
   const remaining = gauge.remaining_to_target;
-  const projected = forecast.projected_weekly_change_kg;
-  const direction = projected <= -0.05 ? 'lose' : projected >= 0.05 ? 'gain' : 'hold';
 
   return (
     <Card
@@ -85,7 +77,9 @@ export function HomeGauge({
 
       <div className="relative p-5 sm:p-8">
         {/* -- 4.4 Primary actions, pinned to the top of the hero -------- */}
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Always stacked: this card is half width now, so badges and both
+            actions cannot share a row without clipping the second label. */}
+        <div className="mb-6 flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <Badge tone={gauge.over_target ? 'warning' : 'success'} icon={<Flame size={13} />}>
               {remaining >= 0 ? `${kcal(remaining)} kcal left` : `${kcal(-remaining)} kcal over`}
@@ -98,12 +92,14 @@ export function HomeGauge({
             )}
           </div>
 
-          <div className="flex flex-col gap-3 xs:flex-row">
+          {/* Column-first: this card now shares a row, so a horizontal pair
+              clipped the second label at narrow widths. */}
+          <div className="flex flex-col gap-2.5 xs:flex-row">
             <Button
               size="lg"
               icon={<Camera size={20} />}
               onClick={onLogFood}
-              className="flex-1 whitespace-nowrap px-5 sm:flex-none sm:px-8"
+              className="flex-1 whitespace-nowrap px-5"
             >
               Log food
             </Button>
@@ -112,7 +108,7 @@ export function HomeGauge({
               variant="tonal"
               icon={<Scale size={20} />}
               onClick={onLogWeight}
-              className="flex-1 whitespace-nowrap px-5 sm:flex-none sm:px-8"
+              className="flex-1 whitespace-nowrap px-5"
             >
               {weight.logged_today ? 'Update weight' : 'Log weight'}
             </Button>
@@ -136,137 +132,165 @@ export function HomeGauge({
           <LegendSwatch className="bg-md-gauge-marker" label="Daily goal" isTick />
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
-          {/* -- 4.2 Rolling-window stats ------------------------------- */}
-          <div className="rounded-lg bg-md-surface/70 p-5 backdrop-blur-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="inline-flex items-center gap-2 text-label-md font-medium text-md-on-surface-variant">
-                <CalendarRange size={16} />
-                Intake
-              </span>
-              <Segmented
-                size="sm"
-                label="Statistics period"
-                options={PERIOD_OPTIONS}
-                value={period}
-                onChange={setPeriod}
-              />
-            </div>
-
-            <p className="mt-4 text-body-md text-md-on-surface-variant">
-              You&apos;ve eaten{' '}
-              <span className="tabular text-headline-sm font-medium text-md-on-surface">
-                {kcal(stats.total_calories)}
-              </span>{' '}
-              calories {PERIOD_PHRASE[period]}.
-            </p>
-
-            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-label-md">
-              <StatPair label="Daily average" value={`${kcal(stats.daily_average)} kcal`} />
-              <StatPair label="Days logged" value={`${stats.days_logged} of ${stats.days}`} />
-              <StatPair label="Protein" value={`${Math.round(stats.protein_g)} g`} />
-              <StatPair
-                label="Workouts"
-                value={
-                  stats.workout_sessions > 0
-                    ? `${stats.workout_sessions} · ${kcal(stats.total_burned)} kcal`
-                    : 'none logged'
-                }
-              />
-            </dl>
-          </div>
-
-          {/* -- 4.3 Live weight trend --------------------------------- */}
-          <div className="rounded-lg bg-md-surface/70 p-5 backdrop-blur-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="inline-flex items-center gap-2 text-label-md font-medium text-md-on-surface-variant">
-                <Sparkles size={16} />
-                Projection
-              </span>
-              <Segmented
-                size="sm"
-                label="Averaging window"
-                options={WINDOW_OPTIONS}
-                value={forecastWindow}
-                onChange={onForecastWindowChange}
-              />
-            </div>
-
-            <p className="mt-4 flex items-start gap-2 text-body-md text-md-on-surface-variant">
-              <TrendIcon direction={direction} />
-              <span>
-                At your current pace you&apos;re projected to{' '}
-                {direction === 'hold' ? (
-                  <span className="font-medium text-md-on-surface">hold steady</span>
-                ) : (
-                  <>
-                    <span className="font-medium text-md-on-surface">
-                      {direction === 'lose' ? 'lose' : 'gain'}
-                    </span>{' '}
-                    <span className="tabular text-headline-sm font-medium text-md-on-surface">
-                      {weightDelta(Math.abs(projected), unit).replace(/^[+−]/, '')}
-                    </span>
-                  </>
-                )}{' '}
-                over the next 7 days.
-              </span>
-            </p>
-
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Badge tone={CONFIDENCE_TONE[forecast.confidence]}>
-                {forecast.confidence} confidence
-              </Badge>
-              <span className="tabular text-label-md text-md-on-surface-variant">
-                {signedKcal(forecast.avg_daily_net_kcal)} kcal/day net balance
-              </span>
-            </div>
-
-            {forecast.observed_weekly_change_kg !== null && (
-              <p className="mt-2 text-label-md text-md-on-surface-variant">
-                Your scale says{' '}
-                <span className="tabular font-medium text-md-on-surface">
-                  {weightDelta(forecast.observed_weekly_change_kg, unit)}
-                </span>{' '}
-                per week.
-              </p>
-            )}
-
-            {forecast.days_to_goal !== null && weight.goal_kg !== null && (
-              <p className="mt-2 text-label-md text-md-on-surface-variant">
-                {forecast.days_to_goal === 0
-                  ? 'You are at your goal weight.'
-                  : `~${forecast.days_to_goal} days to ${weight.goal_kg} ${weightUnitLabel(unit)}`}
-                {forecast.goal_date && forecast.days_to_goal > 0 && (
-                  <span className="text-md-on-surface-variant/80">
-                    {' '}
-                    (around{' '}
-                    {new Date(`${forecast.goal_date}T12:00:00`).toLocaleDateString(undefined, {
-                      month: 'short',
-                      year: 'numeric',
-                    })}
-                    )
-                  </span>
-                )}
-              </p>
-            )}
-
-            {forecast.notes.length > 0 && (
-              <p className="mt-3 text-label-sm text-md-on-surface-variant/80">
-                {forecast.notes[0]}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Today's context strip */}
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <MiniStat label="Entries today" value={String(today.entry_count)} />
-          <MiniStat label="Protein" value={`${Math.round(today.protein_g)} g`} />
-          <MiniStat label="Carbs" value={`${Math.round(today.carbs_g)} g`} />
-          <MiniStat label="Fat" value={`${Math.round(today.fat_g)} g`} />
-        </div>
       </div>
     </Card>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Intake and projection, split out of the gauge card
+// ---------------------------------------------------------------------------
+/**
+ * The numeric breakdown that used to sit inside the gauge card. It moved out
+ * when the gauge became a half-width column: two segmented controls and a
+ * four-up stat row cannot share that space without wrapping badly, so they run
+ * full width beneath instead.
+ */
+export function HomeBreakdown({
+  data,
+  forecastWindow,
+  onForecastWindowChange,
+  unit = 'metric',
+}: HomeGaugeProps) {
+  const [period, setPeriod] = useState<PeriodKey>('week');
+  const { forecast, periods, weight, today } = data;
+  const stats = periods[period];
+  const projected = forecast.projected_weekly_change_kg;
+  const direction = projected <= -0.05 ? 'lose' : projected >= 0.05 ? 'gain' : 'hold';
+
+  return (
+    <div className="space-y-4">
+    <div className="mt-6 grid gap-4 md:grid-cols-2">
+      {/* -- 4.2 Rolling-window stats ------------------------------- */}
+      <div className="rounded-lg bg-md-surface/70 p-5 backdrop-blur-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-2 text-label-md font-medium text-md-on-surface-variant">
+            <CalendarRange size={16} />
+            Intake
+          </span>
+          <Segmented
+            size="sm"
+            label="Statistics period"
+            options={PERIOD_OPTIONS}
+            value={period}
+            onChange={setPeriod}
+          />
+        </div>
+
+        <p className="mt-4 text-body-md text-md-on-surface-variant">
+          You&apos;ve eaten{' '}
+          <span className="tabular text-headline-sm font-medium text-md-on-surface">
+            {kcal(stats.total_calories)}
+          </span>{' '}
+          calories {PERIOD_PHRASE[period]}.
+        </p>
+
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-label-md">
+          <StatPair label="Daily average" value={`${kcal(stats.daily_average)} kcal`} />
+          <StatPair label="Days logged" value={`${stats.days_logged} of ${stats.days}`} />
+          <StatPair label="Protein" value={`${Math.round(stats.protein_g)} g`} />
+          <StatPair
+            label="Workouts"
+            value={
+              stats.workout_sessions > 0
+                ? `${stats.workout_sessions} · ${kcal(stats.total_burned)} kcal`
+                : 'none logged'
+            }
+          />
+        </dl>
+      </div>
+
+      {/* -- 4.3 Live weight trend --------------------------------- */}
+      <div className="rounded-lg bg-md-surface/70 p-5 backdrop-blur-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-2 text-label-md font-medium text-md-on-surface-variant">
+            <Sparkles size={16} />
+            Projection
+          </span>
+          <Segmented
+            size="sm"
+            label="Averaging window"
+            options={WINDOW_OPTIONS}
+            value={forecastWindow}
+            onChange={onForecastWindowChange}
+          />
+        </div>
+
+        <p className="mt-4 flex items-start gap-2 text-body-md text-md-on-surface-variant">
+          <TrendIcon direction={direction} />
+          <span>
+            At your current pace you&apos;re projected to{' '}
+            {direction === 'hold' ? (
+              <span className="font-medium text-md-on-surface">hold steady</span>
+            ) : (
+              <>
+                <span className="font-medium text-md-on-surface">
+                  {direction === 'lose' ? 'lose' : 'gain'}
+                </span>{' '}
+                <span className="tabular text-headline-sm font-medium text-md-on-surface">
+                  {weightDelta(Math.abs(projected), unit).replace(/^[+−]/, '')}
+                </span>
+              </>
+            )}{' '}
+            over the next 7 days.
+          </span>
+        </p>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Badge tone={CONFIDENCE_TONE[forecast.confidence]}>
+            {forecast.confidence} confidence
+          </Badge>
+          <span className="tabular text-label-md text-md-on-surface-variant">
+            {signedKcal(forecast.avg_daily_net_kcal)} kcal/day net balance
+          </span>
+        </div>
+
+        {forecast.observed_weekly_change_kg !== null && (
+          <p className="mt-2 text-label-md text-md-on-surface-variant">
+            Your scale says{' '}
+            <span className="tabular font-medium text-md-on-surface">
+              {weightDelta(forecast.observed_weekly_change_kg, unit)}
+            </span>{' '}
+            per week.
+          </p>
+        )}
+
+        {forecast.days_to_goal !== null && weight.goal_kg !== null && (
+          <p className="mt-2 text-label-md text-md-on-surface-variant">
+            {forecast.days_to_goal === 0
+              ? 'You are at your goal weight.'
+              : `~${forecast.days_to_goal} days to ${weight.goal_kg} ${weightUnitLabel(unit)}`}
+            {forecast.goal_date && forecast.days_to_goal > 0 && (
+              <span className="text-md-on-surface-variant/80">
+                {' '}
+                (around{' '}
+                {new Date(`${forecast.goal_date}T12:00:00`).toLocaleDateString(undefined, {
+                  month: 'short',
+                  year: 'numeric',
+                })}
+                )
+              </span>
+            )}
+          </p>
+        )}
+
+        {forecast.notes.length > 0 && (
+          <p className="mt-3 text-label-sm text-md-on-surface-variant/80">
+            {forecast.notes[0]}
+          </p>
+        )}
+      </div>
+    </div>
+
+    {/* Today's context strip */}
+    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <MiniStat label="Entries today" value={String(today.entry_count)} />
+      <MiniStat label="Protein" value={`${Math.round(today.protein_g)} g`} />
+      <MiniStat label="Carbs" value={`${Math.round(today.carbs_g)} g`} />
+      <MiniStat label="Fat" value={`${Math.round(today.fat_g)} g`} />
+    </div>
+    </div>
   );
 }
 

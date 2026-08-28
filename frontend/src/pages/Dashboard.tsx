@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { DeficitPanel } from '@/components/DeficitPanel';
-import { HomeGauge } from '@/components/HomeGauge';
+import { HomeBreakdown, HomeGauge } from '@/components/HomeGauge';
 import { InsightCard } from '@/components/InsightCard';
 import { LogFoodSheet } from '@/components/logging/LogFoodSheet';
 import { LogWeightDialog } from '@/components/logging/LogWeightDialog';
@@ -108,6 +108,16 @@ export function Dashboard() {
           unit={unit}
         />
       </div>
+
+      {/* Intake and projection run full width: they need the room. */}
+      <HomeBreakdown
+        data={data}
+        forecastWindow={forecastWindow}
+        onForecastWindowChange={setForecastWindow}
+        onLogFood={() => setFoodOpen(true)}
+        onLogWeight={() => setWeightOpen(true)}
+        unit={unit}
+      />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <InsightCard />
