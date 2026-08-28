@@ -15,6 +15,7 @@ import { useMemo, useState } from 'react';
 
 import { Badge, Blobs, Button, Card, Chip, SelectField, TextField, useToast } from '@/components/md';
 import { useCompleteOnboarding } from '@/hooks/queries';
+import { bmiFor, healthyWeightRange } from '@/lib/bmi';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import {
@@ -123,6 +124,13 @@ export function Onboarding() {
     const raw = Number(goalWeight);
     return raw && !Number.isNaN(raw) ? toKg(raw, unit) : null;
   }, [goalWeight, unit]);
+
+  /** Healthy band from the height entered in step 1, shown while picking a goal. */
+  const healthyRange = useMemo(() => healthyWeightRange(heightCm), [heightCm]);
+  const currentBmi = useMemo(() => bmiFor(currentKg, heightCm), [currentKg, heightCm]);
+  const goalOutsideRange = Boolean(
+    goalKg && healthyRange && (goalKg < healthyRange.minKg || goalKg > healthyRange.maxKg),
+  );
 
   const age = useMemo(() => {
     if (!birthDate) return null;
@@ -379,6 +387,32 @@ export function Onboarding() {
                     suffix={weightUnitLabel(unit)}
                     hint="Leave blank if you just want to track."
                   />
+
+                  {healthyRange && (
+                    <div className="rounded-sm bg-md-surface-container-low px-4 py-3">
+                      <p className="font-prose text-body-sm text-md-on-surface">
+                        Based on your height, a BMI in the healthy range puts your optimal
+                        weight at{' '}
+                        <span className="font-medium">
+                          {fromKg(healthyRange.minKg, unit).toFixed(1)}
+                          {' ~ '}
+                          {fromKg(healthyRange.maxKg, unit).toFixed(1)} {weightUnitLabel(unit)}
+                        </span>
+                        {currentBmi !== null && <> — you are at {currentBmi.toFixed(1)} now.</>}
+                      </p>
+                      {goalOutsideRange && (
+                        <p className="mt-1.5 font-prose text-label-sm text-md-on-surface-variant">
+                          Your goal of {fromKg(goalKg!, unit).toFixed(1)}{' '}
+                          {weightUnitLabel(unit)} sits{' '}
+                          {goalKg! < healthyRange.minKg ? 'below' : 'above'} that band.
+                        </p>
+                      )}
+                      <p className="mt-1.5 font-prose text-label-sm text-md-on-surface-variant/85">
+                        BMI is only mass over height — it cannot tell muscle from fat, so treat
+                        this as a reference rather than a target.
+                      </p>
+                    </div>
+                  )}
 
                   {currentKg && goalKg && (
                     <div className="rounded-sm bg-md-secondary-container px-4 py-3 text-body-sm text-md-on-secondary-container">
