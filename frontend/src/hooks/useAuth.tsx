@@ -62,14 +62,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { needsEmailConfirmation: Boolean(data.user && !data.session) };
   }, []);
 
-  const signInWithGoogle = useCallback(async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/` },
-    });
-    if (error) fail(error.message);
-  }, []);
-
   const sendPasswordReset = useCallback(async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: `${window.location.origin}/`,
@@ -90,11 +82,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       configured: isSupabaseConfigured,
       signIn,
       signUp,
-      signInWithGoogle,
       sendPasswordReset,
       signOut,
     }),
-    [session, initialising, signIn, signUp, signInWithGoogle, sendPasswordReset, signOut],
+    [session, initialising, signIn, signUp, sendPasswordReset, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -13,7 +13,6 @@ export interface AuthState {
     password: string,
     fullName: string,
   ) => Promise<{ needsEmailConfirmation: boolean }>;
-  signInWithGoogle: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
 }

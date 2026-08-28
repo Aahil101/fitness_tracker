@@ -10,15 +10,13 @@ import {
   Mail,
   MessageCircleHeart,
   Moon,
-  Sparkles,
   Sun,
   TrendingDown,
   User,
 } from 'lucide-react';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 
-import { CalorieGauge } from '@/components/CalorieGauge';
-import { Badge, Blobs, Button, IconButton, TextField, useToast } from '@/components/md';
+import { Blobs, Button, IconButton, TextField, useToast } from '@/components/md';
 import { useAuth } from '@/hooks/authContext';
 import { useTheme } from '@/hooks/useTheme';
 import { cn } from '@/lib/cn';
@@ -50,13 +48,17 @@ const PASSWORD_RULES = [
 ];
 
 /**
- * Sign-in / sign-up. Two panes on desktop: a marketing-weight left column that
- * shows the actual product primitive (a live gauge) and the form on the right.
- * On mobile the pitch collapses to a compact header so the form stays above the
- * fold — nobody wants to scroll past a hero to log in.
+ * Sign-in / sign-up. Two panes on desktop: a marketing-weight left column
+ * carrying the pitch and the form on the right. On mobile the pitch collapses
+ * to a compact header so the form stays above the fold — nobody wants to
+ * scroll past a hero to log in.
+ *
+ * Email and password only. Social providers are deliberately absent: none are
+ * configured in Supabase Auth, and rendering a provider button that is not
+ * enabled sends the browser to a raw GoTrue error page.
  */
 export function AuthPage() {
-  const { signIn, signUp, signInWithGoogle, sendPasswordReset } = useAuth();
+  const { signIn, signUp, sendPasswordReset } = useAuth();
   const { theme, toggle } = useTheme();
   const toast = useToast();
   const reduceMotion = useReducedMotion();
@@ -69,10 +71,6 @@ export function AuthPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
-
-  // A demo gauge that animates on load, so the value proposition is visible
-  // before signing up rather than described in prose.
-  const demo = useMemo(() => ({ logged: 1420, maintenance: 2400, target: 1900 }), []);
 
   const passwordChecks = PASSWORD_RULES.map((rule) => ({
     ...rule,
@@ -166,21 +164,6 @@ export function AuthPage() {
             Snap a photo, get real macros, and see the exact weight your current pace is heading
             towards — recalculated with every entry.
           </p>
-
-          {/* Live product primitive instead of a stock screenshot. */}
-          <div className="relative mt-8 hidden max-w-md rounded-2xl bg-md-surface-container/80 p-6 shadow-e2 backdrop-blur-sm sm:block">
-            <div className="flex items-center justify-between">
-              <span className="text-label-md font-medium text-md-on-surface-variant">
-                Today at a glance
-              </span>
-              <Badge tone="success" icon={<Sparkles size={12} />}>
-                480 kcal left
-              </Badge>
-            </div>
-            <div className="mt-2">
-              <CalorieGauge {...demo} />
-            </div>
-          </div>
 
           <ul className="mt-8 grid gap-4 sm:grid-cols-3 lg:grid-cols-1 lg:gap-3">
             {FEATURES.map((feature, index) => (
@@ -385,35 +368,6 @@ export function AuthPage() {
                   {copy.cta}
                 </Button>
 
-                {mode !== 'reset' && (
-                  <>
-                    <div className="flex items-center gap-3 py-1">
-                      <span className="h-px flex-1 bg-md-outline-variant" />
-                      <span className="text-label-sm text-md-on-surface-variant">or</span>
-                      <span className="h-px flex-1 bg-md-outline-variant" />
-                    </div>
-
-                    <Button
-                      variant="outlined"
-                      size="lg"
-                      fullWidth
-                      icon={<GoogleMark />}
-                      onClick={() => {
-                        setError(null);
-                        void signInWithGoogle().catch((caught: unknown) =>
-                          setError(
-                            caught instanceof Error
-                              ? `${caught.message} (enable the Google provider in Supabase Auth first)`
-                              : 'Google sign-in failed.',
-                          ),
-                        );
-                      }}
-                    >
-                      Continue with Google
-                    </Button>
-                  </>
-                )}
-
                 {mode === 'reset' && (
                   <Button variant="text" fullWidth onClick={() => setMode('signin')}>
                     Back to sign in
@@ -447,25 +401,3 @@ export function AuthPage() {
   );
 }
 
-function GoogleMark() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden width={18} height={18} className="shrink-0">
-      <path
-        fill="#4285F4"
-        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 23c2.97 0 5.46-.98 7.28-2.65l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A10.99 10.99 0 0 0 12 23z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.84 14.11a6.6 6.6 0 0 1 0-4.22V7.05H2.18a11 11 0 0 0 0 9.9l3.66-2.84z"
-      />
-      <path
-        fill="#EA4335"
-        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.05l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"
-      />
-    </svg>
-  );
-}
