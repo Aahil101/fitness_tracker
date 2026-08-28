@@ -169,6 +169,7 @@ export interface DashboardResponse {
   gauge: GaugeState;
   periods: Record<PeriodKey, PeriodStats>;
   deficit: DeficitSummary;
+  body_composition: BodyComposition;
   forecast: ForecastState;
   weight: {
     current_kg: number | null;
@@ -226,6 +227,9 @@ export interface BodyComposition {
   caveat: string;
   signals: BodyCompositionSignal[];
   lean_risk_score: number;
+  /** Two or three lines of concrete daily numbers to reach the fat-loss zone. */
+  zone_note: string;
+  in_fat_loss_zone: boolean;
 }
 
 export interface AnalyticsResponse {

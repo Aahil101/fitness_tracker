@@ -102,6 +102,25 @@ def _period_stats(
     }
 
 
+
+def _avg_daily_protein(
+    food_rows: list[dict[str, Any]], ctx: UserContext, window_days: int
+) -> float | None:
+    """Mean protein across *logged* days in the window.
+
+    Dividing by the whole window instead would read an unlogged day as a
+    zero-protein one and drag the average below what was actually eaten.
+    """
+    start = ctx.today - timedelta(days=window_days - 1)
+    series = aggregate.macro_daily_series(
+        food_rows=food_rows, tz=ctx.tz, start=start, end=ctx.today
+    )
+    logged = [day for day in series if day["calories"] > 0]
+    if not logged:
+        return None
+    return round(sum(day["protein_g"] for day in logged) / len(logged), 1)
+
+
 @router.get("/dashboard")
 async def dashboard(
     # Accepts any window rather than a Literal: FastAPI hands query values over
@@ -141,6 +160,7 @@ async def dashboard(
         today=ctx.today,
     )
 
+    dash_observed_weekly, dash_span_days = observed_weekly_change(points)
     logged_today_weight = bool(points and points[-1].day == ctx.today)
 
     return {
@@ -194,6 +214,19 @@ async def dashboard(
             )
             for name, days in PERIOD_DAYS.items()
         },
+        # Same assessment the analytics page shows, so the dashboard can say
+        # under the macros whether the loss is fat or muscle without a second
+        # request or a second definition.
+        "body_composition": body_composition.assess(
+            weight_kg=points[-1].weight_kg if points else None,
+            weekly_change_kg=dash_observed_weekly,
+            span_days=dash_span_days or 0,
+            avg_protein_g=_avg_daily_protein(year_food, ctx, forecast_window),
+            avg_calories_in=fc.avg_daily_intake,
+            maintenance_calories=maintenance,
+            workout_rows=year_workouts,
+            logged_days=fc.days_with_data,
+        ).to_dict(),
         "deficit": deficit.summarise(
             maintenance_calories=maintenance,
             target_calories=target,

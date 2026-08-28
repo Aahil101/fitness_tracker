@@ -19,7 +19,7 @@ export function DeficitPanel({ data }: { data: DeficitSummary }) {
   const beyondPlan = progress > 1;
 
   return (
-    <Card tone="container" className="flex h-full flex-col rounded-2xl sm:rounded-3xl">
+    <Card tone="neo" className="flex h-full flex-col rounded-2xl sm:rounded-3xl">
       <div className="flex items-center gap-2">
         <span className="grid h-9 w-9 place-items-center rounded-full bg-md-info-container text-md-on-info-container">
           <Flame size={17} />

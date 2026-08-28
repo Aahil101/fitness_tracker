@@ -36,6 +36,9 @@ const BODY_COMP_STATES: BodyComposition[] = [
     caveat:
       'Worked out from your logs, not a body-composition measurement — only a DEXA or similar scan can split fat from muscle. Early drops are largely water and glycogen too.',
     lean_risk_score: 0,
+    zone_note:
+      'You are in the fat-loss zone: the pace, protein, training and deficit are all where they need to be. Hold these numbers and the weight coming off should be mostly fat.',
+    in_fat_loss_zone: true,
     signals: [
       { key: 'rate', label: 'Rate of loss', status: 'good', value: 0.63, detail: '0.63% of bodyweight a week is in the range that favours fat loss.' },
       { key: 'protein', label: 'Protein intake', status: 'good', value: 1.75, detail: '1.8 g/kg is enough to defend muscle in a deficit.' },
@@ -50,6 +53,9 @@ const BODY_COMP_STATES: BodyComposition[] = [
     caveat:
       'Worked out from your logs, not a body-composition measurement — only a DEXA or similar scan can split fat from muscle. Early drops are largely water and glycogen too.',
     lean_risk_score: 8,
+    zone_note:
+      'Protein needs to reach about 134 g a day (72 g more than your recent average). Keep intake above roughly 1,888 kcal — a deeper cut than that starts taking muscle with the fat. Aim to lose no more than about 0.63 kg a week.',
+    in_fat_loss_zone: false,
     signals: [
       { key: 'rate', label: 'Rate of loss', status: 'risk', value: 1.75, detail: '1.75% a week is faster than fat stores can supply, so muscle is probably making up the difference.' },
       { key: 'protein', label: 'Protein intake', status: 'risk', value: 0.75, detail: '0.8 g/kg is well under the 1.6 g/kg that spares muscle.' },
@@ -64,6 +70,9 @@ const BODY_COMP_STATES: BodyComposition[] = [
     caveat:
       'Worked out from your logs, not a body-composition measurement — only a DEXA or similar scan can split fat from muscle. Early drops are largely water and glycogen too.',
     lean_risk_score: 0,
+    zone_note:
+      'Two resistance sessions a week give your body a reason to keep muscle.',
+    in_fat_loss_zone: false,
     signals: [
       { key: 'rate', label: 'Rate of loss', status: 'unknown', value: null, detail: 'Not enough weigh-ins yet to see a trend.' },
       { key: 'protein', label: 'Protein intake', status: 'unknown', value: null, detail: 'Log protein for a few days to judge this.' },
@@ -128,6 +137,23 @@ const DASHBOARD: DashboardResponse = {
       days_logged: 118, total_burned: 24500, workout_sessions: 64, workout_minutes: 2800,
       protein_g: 15200, carbs_g: 19800, fat_g: 5400, fiber_g: 2400,
     },
+  },
+  body_composition: {
+    verdict: 'some_lean_risk',
+    headline: 'Mostly fat loss, but some muscle is probably going with it.',
+    focus: 'Push protein toward 1.6 g per kg of bodyweight — it is the biggest lever you have.',
+    caveat:
+      'Worked out from your logs, not a body-composition measurement — only a DEXA or similar scan can split fat from muscle. Early drops are largely water and glycogen too.',
+    lean_risk_score: 3,
+    zone_note:
+      'Protein needs to reach about 134 g a day (72 g more than your recent average). Keep intake above roughly 1,888 kcal — a deeper cut than that starts taking muscle with the fat.',
+    in_fat_loss_zone: false,
+    signals: [
+      { key: 'rate', label: 'Rate of loss', status: 'good', value: 0.62, detail: '0.62% of bodyweight a week is in the range that favours fat loss.' },
+      { key: 'protein', label: 'Protein intake', status: 'risk', value: 0.74, detail: '0.7 g/kg is well under the 1.6 g/kg that spares muscle.' },
+      { key: 'training', label: 'Resistance training', status: 'watch', value: 1, detail: '1.0 strength sessions a week; two or more protects lean mass better.' },
+      { key: 'deficit', label: 'Deficit depth', status: 'good', value: 21, detail: 'Eating 21% below maintenance is a sustainable gap.' },
+    ],
   },
   deficit: {
     maintenance_calories: 2400,

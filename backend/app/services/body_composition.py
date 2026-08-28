@@ -70,9 +70,72 @@ class BodyCompositionAssessment:
     caveat: str
     signals: list[Signal] = field(default_factory=list)
     lean_risk_score: int = 0
+    #: Two or three lines naming what the daily numbers need to become for the
+    #: loss to be mostly fat, with the actual figures rather than principles.
+    zone_note: str = ""
+    #: True when every signal is already where it needs to be.
+    in_fat_loss_zone: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _zone_note(
+    signals: list[Signal],
+    *,
+    weight_kg: float | None,
+    avg_protein_g: float | None,
+    avg_calories_in: float | None,
+    maintenance_calories: float | None,
+) -> tuple[str, bool]:
+    """Say what the daily limit has to become to keep the loss mostly fat.
+
+    Deliberately arithmetic rather than advice: "add 62 g of protein" is
+    actionable in a way that "prioritise protein" is not.
+    """
+    by_key = {s.key: s for s in signals}
+    lacking = [s for s in signals if s.status in ("risk", "watch")]
+
+    if not lacking:
+        return (
+            "You are in the fat-loss zone: the pace, protein, training and deficit "
+            "are all where they need to be. Hold these numbers and the weight coming "
+            "off should be mostly fat.",
+            True,
+        )
+
+    lines: list[str] = []
+
+    protein = by_key.get("protein")
+    if protein and protein.status in ("risk", "watch") and weight_kg:
+        needed = PROTEIN_GOOD * weight_kg
+        short_by = needed - (avg_protein_g or 0)
+        lines.append(
+            f"Protein needs to reach about {needed:.0f} g a day "
+            f"({short_by:.0f} g more than your recent average)."
+        )
+
+    deficit_signal = by_key.get("deficit")
+    if deficit_signal and deficit_signal.status in ("risk", "watch") and maintenance_calories:
+        floor = maintenance_calories * (1 - DEFICIT_GOOD)
+        lines.append(
+            f"Keep intake above roughly {floor:.0f} kcal — a deeper cut than that "
+            "starts taking muscle with the fat."
+        )
+
+    rate = by_key.get("rate")
+    if rate and rate.status in ("risk", "watch") and weight_kg:
+        lines.append(
+            f"Aim to lose no more than about {RATE_GOOD * weight_kg:.2f} kg a week; "
+            "faster than that outruns what fat can supply."
+        )
+
+    training = by_key.get("training")
+    if training and training.status in ("risk", "watch"):
+        lines.append("Two resistance sessions a week give your body a reason to keep muscle.")
+
+    # Two or three lines, highest leverage first.
+    return " ".join(lines[:3]), False
 
 
 def _rate_signal(weekly_change_kg: float | None, weight_kg: float | None) -> Signal:
@@ -199,6 +262,14 @@ def assess(
 
     # Too little data is its own answer; inventing a verdict from two weigh-ins
     # would be the most misleading thing this could do.
+    zone_note, in_zone = _zone_note(
+        signals,
+        weight_kg=weight_kg,
+        avg_protein_g=avg_protein_g,
+        avg_calories_in=avg_calories_in,
+        maintenance_calories=maintenance_calories,
+    )
+
     if span_days < MIN_SPAN_DAYS or logged_days < MIN_LOGGED_DAYS or not weight_kg:
         return BodyCompositionAssessment(
             verdict="insufficient_data",
@@ -210,6 +281,8 @@ def assess(
             caveat=caveat,
             signals=signals,
             lean_risk_score=0,
+            zone_note=zone_note,
+            in_fat_loss_zone=False,
         )
 
     risk = sum(1 for s in signals if s.status == "risk")
@@ -263,4 +336,6 @@ def assess(
         caveat=caveat,
         signals=signals,
         lean_risk_score=score,
+        zone_note=zone_note,
+        in_fat_loss_zone=in_zone,
     )

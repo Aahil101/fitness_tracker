@@ -68,7 +68,7 @@ export function HomeGauge({
 
   return (
     <Card
-      tone="container"
+      tone="neo"
       padded={false}
       // Extra-large radius: this is the hero container, not a regular card.
       className="relative overflow-hidden rounded-2xl sm:rounded-3xl"

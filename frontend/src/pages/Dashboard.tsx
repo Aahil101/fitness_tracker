@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { DeficitPanel } from '@/components/DeficitPanel';
+import { FatLossNote } from '@/components/FatLossNote';
 import { HomeBreakdown, HomeGauge } from '@/components/HomeGauge';
 import { InsightCard } from '@/components/InsightCard';
 import { LogFoodSheet } from '@/components/logging/LogFoodSheet';
@@ -123,7 +124,7 @@ export function Dashboard() {
         <InsightCard />
 
         {/* Macro progress against the goal */}
-        <Card tone="container">
+        <Card tone="neo">
           <SectionHeader title="Macros today" icon={<Flame size={18} />} />
           <div className="mt-5 space-y-4">
             <MacroBar
@@ -141,11 +142,13 @@ export function Dashboard() {
               tone="success"
             />
           </div>
+
+          <FatLossNote data={data.body_composition} />
         </Card>
       </div>
 
       {/* Today's food, grouped by meal */}
-      <Card tone="container">
+      <Card tone="neo">
         <SectionHeader
           title="Today's entries"
           subtitle={
@@ -228,7 +231,7 @@ export function Dashboard() {
       </Card>
 
       {/* Workouts */}
-      <Card tone="container">
+      <Card tone="neo">
         <SectionHeader
           title="Movement today"
           subtitle={

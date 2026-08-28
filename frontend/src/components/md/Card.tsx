@@ -2,7 +2,15 @@ import type { HTMLAttributes, ReactNode } from 'react';
 
 import { cn } from '@/lib/cn';
 
-type Tone = 'container' | 'low' | 'high' | 'primary' | 'tertiary' | 'outlined' | 'glass';
+type Tone =
+  | 'container'
+  | 'low'
+  | 'high'
+  | 'primary'
+  | 'tertiary'
+  | 'outlined'
+  | 'glass'
+  | 'neo';
 
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   tone?: Tone;
@@ -20,6 +28,8 @@ const TONES: Record<Tone, string> = {
   tertiary: 'bg-md-tertiary-container text-md-on-tertiary-container',
   outlined: 'border border-md-outline-variant bg-md-surface text-md-on-surface',
   glass: 'md-glass text-md-on-surface',
+  // Extruded rather than layered: no border, paired light and shadow instead.
+  neo: 'bg-md-surface-container text-md-on-surface shadow-neo',
 };
 
 /**

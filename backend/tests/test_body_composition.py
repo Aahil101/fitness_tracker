@@ -130,6 +130,9 @@ def test_serialises_for_the_api():
         **BASE, weekly_change_kg=-0.5, avg_protein_g=140.0,
         avg_calories_in=1950.0, workout_rows=strength(8),
     ).to_dict()
-    assert set(payload) == {"verdict", "headline", "focus", "caveat", "signals", "lean_risk_score"}
+    assert set(payload) == {
+        "verdict", "headline", "focus", "caveat", "signals", "lean_risk_score",
+        "zone_note", "in_fat_loss_zone",
+    }
     assert isinstance(payload["signals"], list)
     assert set(payload["signals"][0]) == {"key", "label", "status", "value", "detail"}

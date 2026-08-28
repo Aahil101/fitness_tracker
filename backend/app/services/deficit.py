@@ -40,8 +40,20 @@ def summarise(
     current_weight_kg: float | None = None,
 ) -> dict[str, Any]:
     """Today's deficit plus projected loss, in the shape the home page needs."""
-    food_deficit = maintenance_calories - eaten_calories
+    # Mid-day, food not yet eaten is not a deficit earned. Measuring against
+    # maintenance made an unfinished day look like an achievement: at 8pm with
+    # 521 of 1,763 kcal eaten it claimed a 1,997 kcal food deficit and 150% of
+    # plan, which then collapses as dinner is logged. Crediting only down to the
+    # eating target keeps the figure to what the plan actually asks for, and it
+    # still shrinks honestly once intake passes the target.
+    effective_intake = max(eaten_calories, target_calories)
+    food_deficit = maintenance_calories - effective_intake
     total_deficit = food_deficit + exercise_burn
+
+    # True while the day can still change: the food part is the plan's, not a
+    # result, so the UI can label it as on-track rather than banked.
+    on_plan = eaten_calories < target_calories
+    remaining_to_eat = max(0.0, target_calories - eaten_calories)
 
     # net_balance is negative for a deficit; flip it so "deficit" reads positive.
     avg_daily_deficit = -avg_daily_net_kcal
@@ -79,13 +91,15 @@ def summarise(
         "target_calories": round(target_calories, 1),
         "exercise_burn": round(exercise_burn, 1),
         "eaten_calories": round(eaten_calories, 1),
+        "remaining_to_eat": round(remaining_to_eat, 1),
         # Deficit, split so the user can see where it came from.
         "food_deficit": round(food_deficit, 1),
         "exercise_deficit": round(exercise_burn, 1),
         "total_deficit": round(total_deficit, 1),
+        "on_plan": on_plan,
         # How much of the day's intended deficit has been achieved, for a bar.
         "target_deficit": round(max(0.0, maintenance_calories - target_calories), 1),
-        "progress_fraction": _progress(maintenance_calories, target_calories, total_deficit),
+        "progress_fraction": _progress(maintenance_calories, target_calories, food_deficit),
         # Projection, gated on having enough history.
         "tracked_days": days_with_data,
         "min_days_required": MIN_DAYS_FOR_PROJECTION,
@@ -96,11 +110,17 @@ def summarise(
     }
 
 
-def _progress(maintenance: float, target: float, total_deficit: float) -> float:
-    """Today's deficit as a fraction of the deficit the plan asks for."""
+def _progress(maintenance: float, target: float, food_deficit: float) -> float:
+    """How much of the planned *eating* deficit is intact.
+
+    Measures the food side only. Including exercise pinned the bar past 100% on
+    any day with a workout, which says nothing about whether the plan is being
+    followed — exercise is surplus to it, and is reported separately. Eating
+    within the target reads full; going over eats into the bar.
+    """
     intended = maintenance - target
     if intended <= 0:
-        # Maintaining or bulking: there is no deficit to fill, so show it full
-        # rather than dividing by zero and rendering an empty bar forever.
-        return 1.0 if total_deficit >= 0 else 0.0
-    return round(max(0.0, min(1.5, total_deficit / intended)), 4)
+        # Maintaining or bulking: no deficit to fill, so show it complete rather
+        # than dividing by zero and rendering an empty bar forever.
+        return 1.0 if food_deficit >= 0 else 0.0
+    return round(max(0.0, min(1.0, food_deficit / intended)), 4)

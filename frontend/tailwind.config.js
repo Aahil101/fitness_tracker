@@ -135,6 +135,11 @@ export default {
         e3: '0 4px 8px 3px rgb(0 0 0 / 0.08), 0 1px 3px 0 rgb(0 0 0 / 0.06)',
         e4: '0 6px 10px 4px rgb(0 0 0 / 0.09), 0 2px 3px 0 rgb(0 0 0 / 0.07)',
         e5: '0 8px 12px 6px rgb(0 0 0 / 0.1), 0 4px 4px 0 rgb(0 0 0 / 0.08)',
+        // Soft UI: paired highlight and shadow so a surface reads as extruded
+        // from the page rather than floating above it.
+        neo: '-6px -6px 14px rgb(var(--md-neo-light) / 0.9), 6px 6px 16px rgb(var(--md-neo-shadow) / 0.5)',
+        'neo-sm': '-3px -3px 7px rgb(var(--md-neo-light) / 0.85), 3px 3px 8px rgb(var(--md-neo-shadow) / 0.45)',
+        'neo-inset': 'inset 3px 3px 7px rgb(var(--md-neo-shadow) / 0.45), inset -3px -3px 7px rgb(var(--md-neo-light) / 0.85)',
         'glow-primary': '0 0 0 1px rgb(var(--md-primary) / 0.18), 0 8px 32px -8px rgb(var(--md-primary) / 0.45)',
         'glow-tertiary': '0 0 0 1px rgb(var(--md-tertiary) / 0.18), 0 8px 32px -8px rgb(var(--md-tertiary) / 0.45)',
       },

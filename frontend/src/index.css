@@ -17,10 +17,15 @@
      * deeper grey for inputs, so each step is distinguishable and the purple is
      * reserved for actual accents.
      */
-    --md-surface: 255 255 255; /* true white page */
+    /*
+     * A hair off pure white on purpose. Neumorphism needs the page slightly
+     * darker than its raised cards, or the light highlight has nothing to sit
+     * against and the effect collapses into a flat rectangle.
+     */
+    --md-surface: 246 247 249;
     --md-surface-dim: 241 241 244;
     --md-surface-container-low: 244 244 246; /* inputs, recessed */
-    --md-surface-container: 249 249 251; /* default card, just off white */
+    --md-surface-container: 253 253 254; /* raised card, lighter than the page */
     --md-surface-container-high: 238 238 242;
     --md-surface-container-highest: 231 231 236;
     --md-surface-variant: 236 236 240;
@@ -80,6 +85,10 @@
     --md-on-info: 255 255 255;
     --md-info-container: 209 231 255;
     --md-on-info-container: 0 72 150;
+
+    /* Neumorphic pair: a light highlight up-left, a soft shadow down-right. */
+    --md-neo-light: 255 255 255;
+    --md-neo-shadow: 190 196 206;
 
     /* Outlines */
     --md-outline: 138 138 148;
@@ -152,6 +161,8 @@
     --md-info: 13 129 255;
     --md-info-strong: 0 105 219;
     --md-on-info: 255 255 255;
+    --md-neo-light: 44 45 51;
+    --md-neo-shadow: 6 6 8;
     --md-info-container: 0 46 97;
     --md-on-info-container: 135 192 255;
 
