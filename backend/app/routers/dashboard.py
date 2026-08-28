@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query
 
 from ..db import build_params, eq
 from ..deps import UserContext, fetch_food_logs, fetch_weight_logs, fetch_workouts, get_context
-from ..services import aggregate
+from ..services import aggregate, body_composition
 from ..services.forecast import forecast as run_forecast
 from ..services.forecast import observed_weekly_change, project_weight_series
 
@@ -345,6 +345,16 @@ async def analytics(
             "confidence": fc.confidence,
             "notes": fc.notes,
         },
+        "body_composition": body_composition.assess(
+            weight_kg=points[-1].weight_kg if points else None,
+            weekly_change_kg=observed_weekly,
+            span_days=span_days or 0,
+            avg_protein_g=avg("protein_g"),
+            avg_calories_in=avg("calories"),
+            maintenance_calories=maintenance,
+            workout_rows=workout_rows,
+            logged_days=len(logged_macro_days),
+        ).to_dict(),
         "targets": {"daily_calorie_target": int(target), "maintenance_calories": int(maintenance)},
     }
 

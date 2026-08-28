@@ -186,6 +186,29 @@ export interface MacroPoint {
   fiber_g: number;
 }
 
+export interface BodyCompositionSignal {
+  key: 'rate' | 'protein' | 'training' | 'deficit';
+  label: string;
+  status: 'good' | 'watch' | 'risk' | 'unknown';
+  value: number | null;
+  detail: string;
+}
+
+export interface BodyComposition {
+  verdict:
+    | 'insufficient_data'
+    | 'mostly_fat'
+    | 'some_lean_risk'
+    | 'high_lean_risk'
+    | 'gaining'
+    | 'maintaining';
+  headline: string;
+  focus: string;
+  caveat: string;
+  signals: BodyCompositionSignal[];
+  lean_risk_score: number;
+}
+
 export interface AnalyticsResponse {
   range: { from: string; to: string; days: number };
   calorie_series: CaloriePoint[];
@@ -203,6 +226,7 @@ export interface AnalyticsResponse {
     sessions: number;
   }[];
   forecast: ForecastState & { observed_span_days: number };
+  body_composition: BodyComposition;
   targets: { daily_calorie_target: number; maintenance_calories: number };
 }
 

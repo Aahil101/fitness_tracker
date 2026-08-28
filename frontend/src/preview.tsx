@@ -7,7 +7,9 @@
  */
 
 import { createRoot } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 
+import { BodyCompositionCard } from './components/BodyCompositionCard';
 import { CalorieGauge } from './components/CalorieGauge';
 import { HomeGauge } from './components/HomeGauge';
 import {
@@ -20,10 +22,58 @@ import {
   Segmented,
   TextField,
 } from './components/md';
-import type { DashboardResponse } from './lib/types';
+import type { BodyComposition, DashboardResponse } from './lib/types';
 import './index.css';
 
 const today = new Date().toISOString().slice(0, 10);
+
+// Body-composition verdicts, so every state can be eyeballed at once.
+const BODY_COMP_STATES: BodyComposition[] = [
+  {
+    verdict: 'mostly_fat',
+    headline: 'The loss looks like mostly fat.',
+    focus: 'Nothing to change: hold protein, training and pace where they are.',
+    caveat:
+      'Worked out from your logs, not a body-composition measurement — only a DEXA or similar scan can split fat from muscle. Early drops are largely water and glycogen too.',
+    lean_risk_score: 0,
+    signals: [
+      { key: 'rate', label: 'Rate of loss', status: 'good', value: 0.63, detail: '0.63% of bodyweight a week is in the range that favours fat loss.' },
+      { key: 'protein', label: 'Protein intake', status: 'good', value: 1.75, detail: '1.8 g/kg is enough to defend muscle in a deficit.' },
+      { key: 'training', label: 'Resistance training', status: 'good', value: 2.0, detail: '2.0 strength sessions a week gives muscle a reason to stay.' },
+      { key: 'deficit', label: 'Deficit depth', status: 'good', value: 19, detail: 'Eating 19% below maintenance is a sustainable gap.' },
+    ],
+  },
+  {
+    verdict: 'high_lean_risk',
+    headline: 'This pattern is likely costing you muscle as well as fat.',
+    focus: 'Push protein toward 1.6 g per kg of bodyweight — it is the biggest lever you have.',
+    caveat:
+      'Worked out from your logs, not a body-composition measurement — only a DEXA or similar scan can split fat from muscle. Early drops are largely water and glycogen too.',
+    lean_risk_score: 8,
+    signals: [
+      { key: 'rate', label: 'Rate of loss', status: 'risk', value: 1.75, detail: '1.75% a week is faster than fat stores can supply, so muscle is probably making up the difference.' },
+      { key: 'protein', label: 'Protein intake', status: 'risk', value: 0.75, detail: '0.8 g/kg is well under the 1.6 g/kg that spares muscle.' },
+      { key: 'training', label: 'Resistance training', status: 'risk', value: 0, detail: 'No strength sessions logged. Without a reason to keep muscle, the body sheds it.' },
+      { key: 'deficit', label: 'Deficit depth', status: 'risk', value: 46, detail: '46% below maintenance is severe and hard to do without losing muscle.' },
+    ],
+  },
+  {
+    verdict: 'insufficient_data',
+    headline: 'Not enough history yet to tell fat loss from muscle loss.',
+    focus: 'Keep logging meals and weighing in for about two weeks — the trend needs that long before it means anything.',
+    caveat:
+      'Worked out from your logs, not a body-composition measurement — only a DEXA or similar scan can split fat from muscle. Early drops are largely water and glycogen too.',
+    lean_risk_score: 0,
+    signals: [
+      { key: 'rate', label: 'Rate of loss', status: 'unknown', value: null, detail: 'Not enough weigh-ins yet to see a trend.' },
+      { key: 'protein', label: 'Protein intake', status: 'unknown', value: null, detail: 'Log protein for a few days to judge this.' },
+      { key: 'training', label: 'Resistance training', status: 'watch', value: 1.0, detail: '1.0 strength sessions a week; two or more protects lean mass better.' },
+      { key: 'deficit', label: 'Deficit depth', status: 'unknown', value: null, detail: 'Log meals for a few days to judge this.' },
+    ],
+  },
+];
+
+
 
 const DASHBOARD: DashboardResponse = {
   today: {
@@ -225,6 +275,15 @@ export function Preview() {
         </section>
 
         <section>
+          <h2 className="mb-3 text-title-lg font-medium">Fat or muscle?</h2>
+          <div className="grid gap-4 lg:grid-cols-3">
+            {BODY_COMP_STATES.map((state) => (
+              <BodyCompositionCard key={state.verdict} data={state} />
+            ))}
+          </div>
+        </section>
+
+        <section>
           <h2 className="mb-3 text-title-lg font-medium">Surface tones</h2>
           <div className="grid gap-4 sm:grid-cols-3">
             {(['container', 'low', 'high', 'primary', 'tertiary', 'outlined'] as const).map(
@@ -242,4 +301,9 @@ export function Preview() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(<Preview />);
+createRoot(document.getElementById('root')!).render(
+  // BodyCompositionCard links to the coach, so it needs router context here.
+  <MemoryRouter>
+    <Preview />
+  </MemoryRouter>,
+);

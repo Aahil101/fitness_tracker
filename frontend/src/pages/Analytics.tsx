@@ -3,6 +3,7 @@ import { useState } from 'react';
 
 import { CaloriesInOutChart, NetBalanceChart } from '@/components/charts/CalorieChart';
 import { ChartFrame } from '@/components/charts/ChartKit';
+import { BodyCompositionCard } from '@/components/BodyCompositionCard';
 import { MacroSplitChart, MacroTrendChart, WorkoutChart } from '@/components/charts/MacroCharts';
 import { WeightChart } from '@/components/charts/WeightChart';
 import {
@@ -202,6 +203,8 @@ export function Analytics() {
           </ChartFrame>
         </Card>
       </div>
+
+      <BodyCompositionCard data={data.body_composition} />
 
       {/* Workouts */}
       <Card tone="container">

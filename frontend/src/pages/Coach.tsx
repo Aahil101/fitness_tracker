@@ -9,6 +9,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 
 import {
   Badge,
@@ -49,10 +50,24 @@ export function Coach() {
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const location = useLocation();
   /** Shown immediately so the conversation feels responsive before the round trip. */
   const [pending, setPending] = useState<string | null>(null);
 
   const messages = useChatMessages(sessionId);
+
+  /**
+   * A prefill arrives from the analytics card's "ask the coach" link. It is put
+   * in the box rather than sent, so the question stays the user's to edit, and
+   * the router state is cleared so a later back/forward does not resurrect it.
+   */
+  const prefill = (location.state as { prefill?: string } | null)?.prefill;
+  useEffect(() => {
+    if (!prefill) return;
+    setDraft(prefill);
+    inputRef.current?.focus();
+    window.history.replaceState({}, '');
+  }, [prefill]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
