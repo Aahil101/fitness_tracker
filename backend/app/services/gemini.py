@@ -13,6 +13,7 @@ whether to degrade gracefully (summaries, chat) or surface the error (vision).
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -25,6 +26,13 @@ from ..errors import ConfigurationError, UpstreamError
 from ..http import get_http_client
 
 log = logging.getLogger(__name__)
+
+# Google answers 503 when the model is momentarily overloaded and 500/502/504
+# when its edge hiccups. All clear on their own, so they are worth one or two
+# quick retries; anything else is a real error and retrying only adds latency.
+TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
+MAX_ATTEMPTS = 3
+RETRY_DELAY_S = 0.8
 
 # Structured-output schema for the food photo pipeline. Gemini's REST API expects
 # OpenAPI-style uppercase type names.
@@ -148,7 +156,8 @@ async def _post(body: dict[str, Any], *, model: str) -> dict[str, Any]:
     url = _endpoint(model)
     headers = {"x-goog-api-key": settings.gemini_api_key, "Content-Type": "application/json"}
 
-    for attempt in range(2):
+    last_transient = 0
+    for attempt in range(MAX_ATTEMPTS):
         try:
             resp = await client.post(
                 url, json=body, headers=headers, timeout=settings.gemini_timeout_s
@@ -156,6 +165,7 @@ async def _post(body: dict[str, Any], *, model: str) -> dict[str, Any]:
         except httpx.HTTPError as exc:
             # httpx timeout exceptions stringify to '', which logged a blank
             # reason and hid the actual cause; fall back to the class name.
+            # Not retried: the attempt already spent the whole timeout budget.
             reason = str(exc) or type(exc).__name__
             raise UpstreamError(f"Could not reach Gemini: {reason}") from exc
 
@@ -173,6 +183,19 @@ async def _post(body: dict[str, Any], *, model: str) -> dict[str, Any]:
             body["generationConfig"].pop("thinkingConfig", None)
             continue
 
+        # 503 means Google's side is momentarily overloaded, not that anything is
+        # wrong with the request; it usually clears on the next attempt and comes
+        # back fast, so the backoff stays well inside the request budget.
+        if resp.status_code in TRANSIENT_STATUSES and attempt < MAX_ATTEMPTS - 1:
+            last_transient = resp.status_code
+            delay = RETRY_DELAY_S * (2**attempt)
+            log.info(
+                "Gemini %s (overloaded), retrying in %.1fs (attempt %d/%d)",
+                resp.status_code, delay, attempt + 1, MAX_ATTEMPTS,
+            )
+            await asyncio.sleep(delay)
+            continue
+
         log.error("Gemini %s error: %s", resp.status_code, detail)
         if resp.status_code == 429:
             raise UpstreamError("Gemini free-tier quota reached. Try again in a minute.")
@@ -183,9 +206,19 @@ async def _post(body: dict[str, Any], *, model: str) -> dict[str, Any]:
                 f"Gemini model '{model}' is not available for this key. "
                 "Set GEMINI_MODEL to a model your key can access."
             )
+        if resp.status_code in TRANSIENT_STATUSES:
+            raise UpstreamError(
+                "Gemini is overloaded right now. Wait a few seconds and try again — "
+                "or enter the food manually."
+            )
         raise UpstreamError(f"Gemini error {resp.status_code}: {detail}")
 
-    raise UpstreamError("Gemini request failed after retry.")
+    raise UpstreamError(
+        f"Gemini stayed overloaded ({last_transient}) after {MAX_ATTEMPTS} attempts. "
+        "Wait a few seconds and try again — or enter the food manually."
+        if last_transient
+        else "Gemini request failed after retry."
+    )
 
 
 async def recognise_food(
