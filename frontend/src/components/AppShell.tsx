@@ -7,6 +7,7 @@ import {
   MessageCircleHeart,
   Settings as SettingsIcon,
   Sun,
+  Timer,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -26,6 +27,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Home', icon: <Home size={22} /> },
   { to: '/diary', label: 'Diary', icon: <BookOpen size={22} /> },
+  { to: '/fasting', label: 'Fasting', icon: <Timer size={22} /> },
   { to: '/analytics', label: 'Trends', icon: <ChartLine size={22} /> },
   { to: '/coach', label: 'Coach', icon: <MessageCircleHeart size={22} /> },
   { to: '/settings', label: 'Settings', icon: <SettingsIcon size={22} /> },
@@ -146,7 +148,7 @@ export function AppShell({
                     {/* MD3 active indicator: a tonal pill behind the icon. */}
                     <span
                       className={cn(
-                        'grid h-8 w-16 place-items-center rounded-full transition-all duration-medium ease-md',
+                        'grid h-8 w-full max-w-16 place-items-center rounded-full transition-all duration-medium ease-md',
                         isActive ? 'bg-md-secondary-container' : 'bg-transparent',
                       )}
                     >

@@ -29,6 +29,8 @@ export const queryKeys = {
   recentFoods: ['recent-foods'] as const,
   workouts: (from: string, to: string) => ['workouts', from, to] as const,
   weights: (days: number) => ['weights', days] as const,
+  fasting: ['fasting'] as const,
+  fastingHistory: (days: number) => ['fasting-history', days] as const,
   streak: ['weigh-in-streak'] as const,
   metCatalog: ['met-catalog'] as const,
   aiStatus: ['ai-status'] as const,
@@ -40,6 +42,9 @@ export const queryKeys = {
 
 /** Everything that changes when a log is added, edited or removed. */
 const LOG_DEPENDENT_KEYS = ['dashboard', 'analytics', 'food-logs', 'workouts', 'weights', 'insight'];
+
+/** Fasting state and its history, invalidated together on start/stop. */
+const FASTING_KEYS = ['fasting', 'fasting-history'];
 
 export function useInvalidateLogs() {
   const client = useQueryClient();
@@ -90,6 +95,58 @@ export function useWorkouts(from: string, to: string) {
     queryFn: () => api.workouts({ from, to }),
     staleTime: 20_000,
   });
+}
+
+/**
+ * The open fast, if any.
+ *
+ * Polled rather than merely cached: the page ticks its own clock between
+ * refetches, but a fast that crosses a stage boundary changes what the server
+ * says, and a phone that has been asleep for two hours needs the truth rather
+ * than a locally extrapolated guess.
+ */
+export function useFasting() {
+  return useQuery({
+    queryKey: queryKeys.fasting,
+    queryFn: api.fastingCurrent,
+    staleTime: 30_000,
+    refetchInterval: 5 * 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useFastingHistory(days = 90) {
+  return useQuery({
+    queryKey: queryKeys.fastingHistory(days),
+    queryFn: () => api.fastingHistory(days),
+    staleTime: 60_000,
+  });
+}
+
+function useInvalidateFasting() {
+  const client = useQueryClient();
+  const invalidateLogs = useInvalidateLogs();
+  return () => {
+    for (const key of FASTING_KEYS) {
+      void client.invalidateQueries({ queryKey: [key] });
+    }
+    invalidateLogs();
+  };
+}
+
+export function useStartFast() {
+  const invalidate = useInvalidateFasting();
+  return useMutation({ mutationFn: api.startFast, onSuccess: invalidate });
+}
+
+export function useStopFast() {
+  const invalidate = useInvalidateFasting();
+  return useMutation({ mutationFn: api.stopFast, onSuccess: invalidate });
+}
+
+export function useDeleteFast() {
+  const invalidate = useInvalidateFasting();
+  return useMutation({ mutationFn: api.deleteFast, onSuccess: invalidate });
 }
 
 export function useWeights(days = 90) {

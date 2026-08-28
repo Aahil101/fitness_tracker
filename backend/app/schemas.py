@@ -255,3 +255,29 @@ class ChatReply(ApiModel):
     assistant_message: ChatMessageOut
     context_used: dict[str, Any] = Field(default_factory=dict)
     degraded: bool = False
+
+
+
+# ---------------------------------------------------------------------------
+# Fasting
+# ---------------------------------------------------------------------------
+class FastingStartRequest(ApiModel):
+    # Upper bound of 168 matches the table's check constraint. Anything past a
+    # day already carries a safety note; a week is the hard stop.
+    target_hours: float = Field(default=16, gt=0, le=168)
+    #: Lets a user record a fast they began earlier — the common case being
+    #: "I last ate at 8pm and only opened the app this morning".
+    started_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=300)
+
+    @field_validator("target_hours")
+    @classmethod
+    def _round_target(cls, v: float) -> float:
+        # Quarter-hour granularity: nobody plans a 16.37-hour fast, and the
+        # extra precision only makes the stored value ugly.
+        return round(v * 4) / 4
+
+
+class FastingStopRequest(ApiModel):
+    ended_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=300)

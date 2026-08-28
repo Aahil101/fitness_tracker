@@ -16,6 +16,7 @@ import { SetupRequired } from '@/pages/SetupRequired';
 const Analytics = lazy(() => import('@/pages/Analytics').then((m) => ({ default: m.Analytics })));
 const Coach = lazy(() => import('@/pages/Coach').then((m) => ({ default: m.Coach })));
 const Diary = lazy(() => import('@/pages/Diary').then((m) => ({ default: m.Diary })));
+const Fasting = lazy(() => import('@/pages/Fasting').then((m) => ({ default: m.Fasting })));
 const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })));
 
 export function App() {
@@ -56,6 +57,7 @@ function AuthenticatedApp() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/diary" element={<Diary />} />
+          <Route path="/fasting" element={<Fasting />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/coach" element={<Coach />} />
           <Route path="/settings" element={<Settings />} />

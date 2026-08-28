@@ -150,3 +150,17 @@ export function browserTimezone(): string {
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
+
+/**
+ * Hours as a duration: 15.13 becomes "15h 08m".
+ *
+ * A decimal hour reads as a quantity rather than a time, which is wrong for a
+ * clock that someone is watching count up.
+ */
+export function hoursLabel(hours: number): string {
+  const safe = Number.isFinite(hours) ? Math.max(0, hours) : 0;
+  const whole = Math.floor(safe);
+  const minutes = Math.round((safe - whole) * 60);
+  if (minutes === 60) return `${whole + 1}h 00m`;
+  return `${whole}h ${String(minutes).padStart(2, '0')}m`;
+}

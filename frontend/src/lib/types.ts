@@ -421,3 +421,85 @@ export interface MetActivity {
   met: number;
   category: string;
 }
+
+
+// ---------------------------------------------------------------------------
+// Fasting
+// ---------------------------------------------------------------------------
+export type FastingStageKey =
+  | 'fed'
+  | 'glycogen'
+  | 'fat_burning'
+  | 'ketosis'
+  | 'deep_ketosis'
+  | 'deep_repair'
+  | 'extended';
+
+export interface FastingStage {
+  key: FastingStageKey;
+  label: string;
+  summary: string;
+  detail: string;
+  start_hours: number;
+  /** null on the open-ended final stage. */
+  end_hours: number | null;
+  status: 'done' | 'active' | 'upcoming';
+  progress: number;
+  reached_at: string | null;
+}
+
+/** Why this user's stage boundaries sit where they do. */
+export interface FastingPersonalisation {
+  shift_hours: number;
+  estimated_depletion_hours: number;
+  liver_glycogen_g: number;
+  fill_fraction: number;
+  drain_g_per_hour: number;
+  recent_carbs_g: number | null;
+  exercise_kcal: number;
+  exercise_glycogen_g: number;
+  weight_kg: number | null;
+  maintenance_kcal: number;
+  how_calculated: string;
+  inputs_used: string[];
+  notes: string[];
+}
+
+export interface FastingState {
+  active: boolean;
+  session_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  target_hours: number;
+  elapsed_hours: number;
+  remaining_hours: number;
+  progress: number;
+  target_reached: boolean;
+  current_stage_key: FastingStageKey | null;
+  next_stage_key: FastingStageKey | null;
+  hours_to_next_stage: number | null;
+  stages: FastingStage[];
+  personalisation: FastingPersonalisation | null;
+  caution: string | null;
+}
+
+export interface FastingSession {
+  id: string;
+  user_id: string;
+  started_at: string;
+  ended_at: string | null;
+  target_hours: number;
+  note: string | null;
+  created_at: string | null;
+}
+
+export interface FastingHistory {
+  sessions: FastingSession[];
+  summary: {
+    sessions: number;
+    completed_on_target: number;
+    longest_hours: number | null;
+    average_hours: number | null;
+    total_hours: number;
+  };
+}

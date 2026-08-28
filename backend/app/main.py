@@ -13,7 +13,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from .config import settings
 from .errors import AppError, app_error_handler, http_error_handler
 from .http import close_http_client, get_http_client
-from .routers import ai, chat, dashboard, food, goals, profile, weight, workouts
+from .routers import ai, chat, dashboard, fasting, food, goals, profile, weight, workouts
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -69,7 +69,7 @@ app.add_middleware(
 app.add_exception_handler(AppError, app_error_handler)  # type: ignore[arg-type]
 app.add_exception_handler(HTTPException, http_error_handler)  # type: ignore[arg-type]
 
-for module in (profile, goals, food, workouts, weight, dashboard, ai, chat):
+for module in (profile, goals, food, workouts, weight, fasting, dashboard, ai, chat):
     app.include_router(module.router)
 
 

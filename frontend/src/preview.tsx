@@ -13,6 +13,8 @@ import { AdherenceCard } from './components/AdherenceCard';
 import { BodyCompositionCard } from './components/BodyCompositionCard';
 import { CalorieGauge } from './components/CalorieGauge';
 import { DeficitPanel } from './components/DeficitPanel';
+import { FastingRing } from './components/FastingRing';
+import { FastingStages } from './components/FastingStages';
 import { HomeBreakdown, HomeGauge } from './components/HomeGauge';
 import { WeightTrendCard } from './components/WeightTrendCard';
 import {
@@ -25,7 +27,14 @@ import {
   Segmented,
   TextField,
 } from './components/md';
-import type { BodyComposition, DashboardResponse } from './lib/types';
+import { hoursLabel } from './lib/format';
+import type {
+  BodyComposition,
+  DashboardResponse,
+  FastingStage,
+  FastingStageKey,
+  FastingState,
+} from './lib/types';
 import './index.css';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -326,6 +335,80 @@ const RATE_STATES: Partial<DashboardResponse['weight_trend']>[] = [
   },
 ];
 
+// --- fasting fixtures ------------------------------------------------------
+// Boundaries taken from a real personalisation run: 84 kg, 2450 kcal
+// maintenance, 324 g carbs and 210 kcal of training gives a -0.87 h shift.
+const STAGE_DEFS: [FastingStageKey, string, string, number, number | null][] = [
+  ['fed', 'Fed', 'Still digesting', 0, 3.48],
+  ['glycogen', 'Running on stored carbs', 'Blood sugar settling', 3.48, 11.13],
+  ['fat_burning', 'Fat burning', 'Switching fuel', 11.13, 15.13],
+  ['ketosis', 'Ketosis', 'Making ketones', 15.13, 23.56],
+  ['deep_ketosis', 'Deep ketosis and cellular cleanup', 'Autophagy ramping', 23.56, 48],
+  ['deep_repair', 'Growth hormone and immune reset', 'Beyond a day', 48, 72],
+  ['extended', 'Extended fast', 'Three days and beyond', 72, null],
+];
+
+function fastingStages(elapsed: number): FastingStage[] {
+  return STAGE_DEFS.map(([key, label, summary, start, end]) => ({
+    key,
+    label,
+    summary,
+    detail: `${label}: what is happening to you metabolically at this point in the fast, explained in a sentence or two.`,
+    start_hours: start,
+    end_hours: end,
+    status: end !== null && elapsed >= end ? 'done' : elapsed >= start ? 'active' : 'upcoming',
+    progress:
+      end === null ? (elapsed >= start ? 1 : 0) : Math.max(0, Math.min(1, (elapsed - start) / (end - start))),
+    reached_at: elapsed >= start ? new Date().toISOString() : null,
+  }));
+}
+
+const FASTING_PERSONALISATION = {
+  shift_hours: -0.87,
+  estimated_depletion_hours: 17.1,
+  liver_glycogen_g: 92.4,
+  fill_fraction: 1,
+  drain_g_per_hour: 5.01,
+  recent_carbs_g: 324,
+  exercise_kcal: 210,
+  exercise_glycogen_g: 6.6,
+  weight_kg: 84,
+  maintenance_kcal: 2450,
+  how_calculated:
+    'Your liver holds roughly 92 g of carbohydrate. Your recent meals left it about 100% full, training has taken about 7 g out, and you use about 5.0 g an hour. That is roughly 17 hours of fuel against the 18 a standard timeline assumes, so fat burning and ketosis are marked 0.9 hours earlier than a fixed chart would.',
+  inputs_used: ['your weight', 'the carbs in your last meals', 'what you burn in a day', 'your recent training'],
+  notes: [],
+};
+
+function fastingState(elapsed: number, target = 18, active = true): FastingState {
+  const stages = fastingStages(elapsed);
+  const upcoming = stages.find((s) => s.status === 'upcoming');
+  return {
+    active,
+    session_id: 'preview',
+    started_at: new Date(Date.now() - elapsed * 3_600_000).toISOString(),
+    ended_at: null,
+    target_hours: target,
+    elapsed_hours: elapsed,
+    remaining_hours: Math.max(0, target - elapsed),
+    progress: Math.min(1, elapsed / target),
+    target_reached: elapsed >= target,
+    current_stage_key: stages.find((s) => s.status === 'active')?.key ?? null,
+    next_stage_key: upcoming?.key ?? null,
+    hours_to_next_stage: upcoming ? Math.max(0, upcoming.start_hours - elapsed) : null,
+    stages,
+    personalisation: FASTING_PERSONALISATION,
+    caution: elapsed >= 24 || target >= 24 ? 'Past a day, fasting needs water, salt and a reason.' : null,
+  };
+}
+
+const FASTING_SNAPSHOTS: { label: string; elapsed: number; target: number }[] = [
+  { label: 'Just started (fed)', elapsed: 0.4, target: 18 },
+  { label: 'Fat burning', elapsed: 13, target: 18 },
+  { label: 'Ketosis', elapsed: 19, target: 18 },
+  { label: 'Overran the target', elapsed: 26, target: 18 },
+];
+
 export function Preview() {
   return (
     <div className="min-h-dvh bg-md-surface px-4 py-8 sm:px-6">
@@ -359,6 +442,58 @@ export function Preview() {
             onLogWeight={() => {}}
             unit="metric"
           />
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-title-lg font-medium">Fasting ring</h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {FASTING_SNAPSHOTS.map((snap) => {
+              const state = fastingState(snap.elapsed, snap.target);
+              return (
+                <Card key={snap.label} tone="container">
+                  <p className="mb-3 text-label-md text-md-on-surface-variant">{snap.label}</p>
+                  <FastingRing
+                    elapsedHours={state.elapsed_hours}
+                    targetHours={state.target_hours}
+                    stages={state.stages}
+                    currentStageKey={state.current_stage_key}
+                    active
+                  >
+                    <span className="tabular text-headline-md font-medium leading-none">
+                      {hoursLabel(state.elapsed_hours)}
+                    </span>
+                    <span className="mt-1 text-label-sm text-md-on-surface-variant">
+                      of {hoursLabel(state.target_hours)}
+                    </span>
+                  </FastingRing>
+                </Card>
+              );
+            })}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-title-lg font-medium">Fasting stages</h2>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card tone="neo">
+              <p className="mb-4 text-label-md text-md-on-surface-variant">Mid-fast (13h)</p>
+              <FastingStages
+                stages={fastingStages(13)}
+                elapsedHours={13}
+                personalisation={FASTING_PERSONALISATION}
+                active
+              />
+            </Card>
+            <Card tone="neo">
+              <p className="mb-4 text-label-md text-md-on-surface-variant">Before starting</p>
+              <FastingStages
+                stages={fastingStages(-1)}
+                elapsedHours={-1}
+                personalisation={FASTING_PERSONALISATION}
+                active={false}
+              />
+            </Card>
+          </div>
         </section>
 
         <section>

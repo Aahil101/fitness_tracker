@@ -13,6 +13,9 @@ import type {
   ChatReply,
   ChatSession,
   DashboardResponse,
+  FastingHistory,
+  FastingSession,
+  FastingState,
   FoodLog,
   FoodPhotoDraft,
   FoodSearchItem,
@@ -237,6 +240,30 @@ export const api = {
 
   deleteWorkout: (id: string) =>
     request<{ deleted: Workout }>(`/api/workouts/${id}`, { method: 'DELETE' }),
+
+  // -- fasting ------------------------------------------------------------
+  fastingCurrent: () => request<FastingState>('/api/fasting/current'),
+
+  startFast: (body: { target_hours: number; started_at?: string; note?: string }) =>
+    request<{ session: FastingSession; state: FastingState }>('/api/fasting/start', {
+      method: 'POST',
+      body,
+    }),
+
+  stopFast: (body: { ended_at?: string; note?: string } = {}) =>
+    request<{
+      session: FastingSession;
+      hours: number;
+      target_hours: number;
+      met_target: boolean;
+      state: FastingState;
+    }>('/api/fasting/stop', { method: 'POST', body }),
+
+  fastingHistory: (days = 90) =>
+    request<FastingHistory>('/api/fasting/history', { query: { days } }),
+
+  deleteFast: (id: string) =>
+    request<{ deleted: FastingSession }>(`/api/fasting/${id}`, { method: 'DELETE' }),
 
   // -- weight -------------------------------------------------------------
   weights: (days = 90) =>
