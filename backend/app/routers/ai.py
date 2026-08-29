@@ -233,7 +233,9 @@ async def _resolve_recognised_item(
     # chain's name on it. The model's own estimate is less precise and at least
     # knows what the thing is.
     if decided is None and not branded_unpriced:
-        decided = resolve.from_curated(display_name, query, grams)
+        decided = resolve.from_curated(
+            display_name, query, grams, quantity_text=quantity or display_name
+        )
 
     # -- 2. a cached row, then USDA. Both are screened the same way. -----------
     if decided is None and not branded_unpriced:

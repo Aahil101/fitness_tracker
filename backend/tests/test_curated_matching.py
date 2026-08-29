@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services import food_facts
+from app.services import food_facts, resolve
 
 
 def test_a_description_of_a_food_is_not_a_match_on_what_it_is_served_with() -> None:
@@ -110,3 +110,61 @@ def test_an_ingredient_in_a_dish_is_still_priced_as_the_ingredient() -> None:
     sugar = food_facts.lookup("sugar (added to tea)")
     assert sugar is not None
     assert sugar.name == "sugar"
+
+
+
+# --- the portion, which is where the remaining variance lived ----------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("1", 1.0),
+        ("2 rotis", 2.0),
+        ("3 idli", 3.0),
+        ("2 x roti", 2.0),
+        # A measure, not a count: the model's reading of it is the better number,
+        # because it knows how big the bowl was meant to be and we know one
+        # standard serving.
+        ("200 g", None),
+        ("a bowl of dal", None),
+        ("half cup of tea", None),
+        ("1 cup rice", None),
+        ("1 spoon", None),
+        ("", None),
+    ],
+)
+def test_a_count_of_items_is_told_apart_from_a_measure(text: str, expected: float | None) -> None:
+    assert resolve.unit_count(text) == expected
+
+
+def test_a_counted_food_is_priced_from_our_own_serving_size() -> None:
+    """The density was never in doubt. The weight was.
+
+    Asked three times for "1 plain dosa" production answered 223, 195 and 151 kcal
+    off the same curated entry, because the model called the dosa 130 g, then 114,
+    then 88. Nobody weighs a dosa, so the honest figure is our standard serving,
+    and the same entry then logs the same number every time.
+    """
+    heavy = resolve.from_curated("plain dosa", "dosa", 130, quantity_text="1")
+    light = resolve.from_curated("plain dosa", "dosa", 88, quantity_text="1")
+    assert heavy is not None and light is not None
+    assert heavy.grams == light.grams
+    assert heavy.calories == light.calories
+    assert any("standard serving" in note for note in heavy.notes)
+
+    two = resolve.from_curated("roti", "roti", 95, quantity_text="2")
+    one = resolve.from_curated("roti", "roti", 95, quantity_text="1")
+    assert two is not None and one is not None
+    assert two.grams == pytest.approx(one.grams * 2)
+
+
+def test_a_stated_measure_is_still_respected() -> None:
+    """Overriding a weight the person actually gave would be worse than guessing."""
+    weighed = resolve.from_curated("cooked white rice", "rice", 250, quantity_text="250 g")
+    assert weighed is not None
+    assert weighed.grams == pytest.approx(250)
+
+    bowl = resolve.from_curated("cooked white rice", "rice", 200, quantity_text="a bowl")
+    assert bowl is not None
+    assert bowl.grams == pytest.approx(200)

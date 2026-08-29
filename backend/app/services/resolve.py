@@ -156,14 +156,59 @@ def _scale(per_100g: dict[str, Any], grams: float) -> dict[str, float | None]:
     }
 
 
-def from_curated(name: str, query: str, grams: float) -> Resolved | None:
+#: Words that mean the description gave a measure rather than a count of items, so
+#: the weight has to come from the model's reading of it and not from our own
+#: serving size. "200 g of rice" and "a bowl of dal" are both measures; "2 rotis"
+#: is a count.
+_MEASURE_WORDS = re.compile(
+    r"\b(g|gm|gms|gram|grams|kg|ml|l|litre|liter|cup|cups|bowl|bowls|plate|plates"
+    r"|glass|glasses|spoon|spoons|tbsp|tsp|tablespoon|teaspoon|handful|slice|slices"
+    r"|half|quarter|packet|pack|serving|servings|portion)\b",
+    re.IGNORECASE,
+)
+
+
+def unit_count(text: str) -> float | None:
+    """How many whole items the description asks for, if it asks that way.
+
+    Returns None when the description gives a measure instead, because then the
+    model's reading of it is the better number: it knows how big the bowl was
+    meant to be and our table only knows one standard serving.
+    """
+    if not text or _MEASURE_WORDS.search(text):
+        return None
+    match = re.search(r"\b(\d+(?:\.\d+)?)\b", text)
+    if not match:
+        return None
+    value = float(match.group(1))
+    return value if 0 < value <= 20 else None
+
+
+def from_curated(
+    name: str, query: str, grams: float, *, quantity_text: str = ""
+) -> Resolved | None:
     """First and best answer, when the food is one we have written down."""
     fact = food_facts.lookup(name) or food_facts.lookup(query)
     if fact is None:
         return None
 
-    scaled = _scale(food_facts.as_item(fact), grams)
     notes = [f"Matched our own table: {fact.name}."]
+
+    # A counted food is priced from our own serving size, not the model's guess at
+    # it. The guess is the only thing that moves between identical entries: asked
+    # three times for "1 plain dosa", the same curated density gave 223, 195 and
+    # 151 kcal, because the model called the dosa 130 g, then 114, then 88. The
+    # density was never in doubt; the weight was, and we have a figure for it.
+    count = unit_count(quantity_text) or unit_count(name)
+    if count is not None and fact.serving_g:
+        portion = fact.serving_g * count
+        if abs(portion - grams) > 1:
+            notes.append(
+                f"Portion taken as {count:g} x {fact.serving_g:g} g, our standard serving."
+            )
+        grams = portion
+
+    scaled = _scale(food_facts.as_item(fact), grams)
     if fact.note:
         notes.append(fact.note)
     return Resolved(
