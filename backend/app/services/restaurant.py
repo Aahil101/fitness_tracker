@@ -355,7 +355,7 @@ _GENERIC_PRODUCT_WORDS = frozenset(
 PRODUCT_WORD_THRESHOLD = 0.8
 
 
-def _spoken_words(text: str) -> list[str]:
+def _spoken_words(text: str, chain: str | None = None) -> list[str]:
     """The words available to match, including neighbours run together.
 
     Menus close up names that people space out: the item is a McAloo Tikki and the
@@ -364,10 +364,40 @@ def _spoken_words(text: str) -> list[str]:
     is two characters short of "mcaloo" and a threshold loose enough to bridge that
     also matched "chicken" to "McChicken", so "mcdonalds butter chicken" came back
     as a McChicken Burger.
+
+    The chain's own name is dropped first. It has already done its job identifying
+    the chain and carries nothing about which item was ordered, and leaving it in
+    was actively harmful: an apostrophe normalises to a space, so "Domino's" yields
+    the word "domino", which scores exactly 0.80 against "dominator" — and a large
+    Margherita came back as a Chicken Dominator, 450 kcal high with 127 g of
+    protein on a cheese pizza.
     """
     words = _normalise(text).split()
+    if chain:
+        ignore = _chain_words(chain)
+        words = [w for w in words if w not in ignore]
     joined = [words[i] + words[i + 1] for i in range(len(words) - 1)]
     return [w for w in [*words, *joined] if len(w) > 2]
+
+
+@lru_cache(maxsize=64)
+def _chain_words(chain: str) -> frozenset[str]:
+    """Words that only say which chain this is, and never which item.
+
+    A word is only pure branding if the chain's own menu never uses it. "Taco Bell"
+    would otherwise contribute "taco", and dropping that made every taco on the
+    menu unmatchable; "Pizza Hut" would contribute "pizza". So the alias words are
+    checked against the product names before being ignored.
+    """
+    words: set[str] = set()
+    for alias in CHAINS.get(chain, ()):
+        words.update(_normalise(alias).split())
+    words.update(_normalise(chain).split())
+
+    in_products: set[str] = set()
+    for item in menu_table().by_chain.get(chain, ()):
+        in_products.update(_normalise(_product_of(item.name)).split())
+    return frozenset(words - in_products)
 
 
 def _same_word(spoken: str, wanted: str) -> bool:
@@ -423,7 +453,7 @@ def lookup_known(text: str, chain: str) -> BrandedFood | None:
     row comes first. A size or crust named in the description wins; otherwise the
     lowest-ranked form is used, which is the one the menu treats as standard.
     """
-    spoken = _spoken_words(text)
+    spoken = _spoken_words(text, chain)
     if not spoken:
         return None
 
@@ -446,37 +476,47 @@ def lookup_known(text: str, chain: str) -> BrandedFood | None:
 
     if not candidates:
         return None
+    # The form is chosen from every word the person typed, digits included: a piece
+    # count is a single character, which product matching discards.
     return _pick_variant(candidates, _normalise(text).split())
 
 
 def _pick_variant(candidates: list[BrandedFood], said: list[str]) -> BrandedFood:
-    """Among forms of the same product, the one the description asks for.
+    """Among the products that fit, and the forms of them, the one asked for.
 
     Scored on the whole normalised description rather than the filtered product
     tokens, because the words that pick a form are exactly the ones product
     matching throws away: the sizes, and the piece counts. "6 piece chicken
     mcnuggets" was resolving to the 4 piece box at 170 kcal because the token list
     dropped everything shorter than three characters, so the 6 was never seen.
+
+    Products the person named outright outrank products that only matched
+    approximately. Nothing should reach here having matched two different pizzas,
+    but if it does, the tie must not be settled by file order.
     """
     if len(candidates) == 1:
         return candidates[0]
 
     spoken = set(said)
 
-    def score(item: BrandedFood) -> tuple[int, int]:
+    def score(item: BrandedFood) -> tuple[int, int, int]:
+        product_words = set(_normalise(_product_of(item.name)).split())
+        named_outright = len(product_words & spoken)
+
         # The stored size is the expanded form, which matters because McDonald's
         # writes drink sizes as a single letter: "Latte (L)" normalises to "latte
         # l", and nobody types "l", so "large latte" was resolving to the regular.
-        words = set(_normalise(item.size).split())
-        words |= {
+        form_words = set(_normalise(item.size).split())
+        form_words |= {
             word
             for word in _normalise(_variant_of(item.name)).split()
             if word in _SIZE_WORDS or word.isdigit()
         }
         # Counts are written into the name for McDonald's boxes of nuggets.
-        words |= set(re.findall(r"\d+", item.name))
+        form_words |= set(re.findall(r"\d+", item.name))
+
         # Negative rank so that, at equal evidence, the standard form sorts first.
-        return len(words & spoken), -item.rank
+        return named_outright, len(form_words & spoken), -item.rank
 
     return max(candidates, key=score)
 

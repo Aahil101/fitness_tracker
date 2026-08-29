@@ -264,6 +264,55 @@ def test_an_item_the_chain_does_not_sell_finds_nothing() -> None:
         assert restaurant.lookup_known(text, chain) is None, text
 
 
+#: What the router actually passes: the parsed name, the search phrase, the
+#: quantity and the user's own words, concatenated. So the chain name appears
+#: several times and words repeat, which is where the collision below came from.
+ROUTER_HAYSTACKS = [
+    (
+        "Domino's Margherita pizza cheese pizza 1 large 1 large dominos margherita pizza",
+        "Margherita",
+        2035.3,
+    ),
+    (
+        "Domino's Peppy Paneer Pizza paneer pizza 1 1 dominos peppy paneer pizza",
+        "Peppy Paneer",
+        857.1,
+    ),
+    (
+        "McDonald's McAloo Tikki burger aloo tikki burger 1 1 mc aloo tikki burger",
+        "McAloo Tikki",
+        339.5,
+    ),
+    (
+        "Domino's Chicken Dominator pizza 1 dominos chicken dominator",
+        "Chicken Dominator",
+        800.8,
+    ),
+]
+
+
+@pytest.mark.parametrize(("haystack", "expected_product", "kcal"), ROUTER_HAYSTACKS)
+def test_the_chain_name_cannot_be_mistaken_for_a_product(
+    haystack: str, expected_product: str, kcal: float
+) -> None:
+    """"Domino's" normalises to the word "domino", which scores 0.80 on "dominator".
+
+    That is the threshold, so a large Margherita came back as a Chicken Dominator:
+    2,482 kcal instead of 2,035, and 127 g of protein on a cheese pizza. The chain
+    has already been identified by the time products are matched, so its own name
+    carries nothing and is dropped before matching.
+
+    Tested through the string the router really builds rather than a tidy phrase,
+    because the repetition in it is what made two products match at once.
+    """
+    chain = restaurant.detect_chain(haystack)
+    assert chain is not None
+    found = restaurant.lookup_known(haystack, chain)
+    assert found is not None
+    assert found.name.startswith(expected_product), f"got {found.name!r}"
+    assert found.kcal == pytest.approx(kcal, abs=1.0)
+
+
 # --- the arithmetic the rest of the pipeline does with the row ---------------
 
 
