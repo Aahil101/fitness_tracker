@@ -76,6 +76,32 @@ def test_a_transposed_brand_name_is_still_recognised() -> None:
     assert restaurant.detect_chain("dominsos pizza") == "Domino's"
 
 
+COUNTS = [
+    ("dominos margarita pizza", 1.0),
+    ("1 domonis peppy panner pizza", 1.0),
+    ("2 mcaloo tikki burgers", 2.0),
+    ("three kfc zingers", 3.0),
+    ("a whopper", 1.0),
+    ("half a dominos pizza", 0.5),
+    ("quarter of a pizza", 0.25),
+    ("a couple of mcaloo tikki", 2.0),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), COUNTS)
+def test_the_portion_is_a_count_of_servings_not_a_guess_at_grams(
+    text: str, expected: float
+) -> None:
+    """A chain sells units, so the only quantity worth reading is how many.
+
+    Asked about "dominos margarita pizza" the model estimated 500 g, and scaling
+    the published 688 kcal figure to that reported 1110 kcal for a single pizza.
+    Fractions are checked before whole numbers because "half a pizza" contains the
+    word "a".
+    """
+    assert restaurant.serving_count(text) == expected
+
+
 def test_checked_items_resolve_without_an_api_call() -> None:
     known = restaurant.lookup_known("dominos margherita pizza", "Domino's")
     assert known is not None

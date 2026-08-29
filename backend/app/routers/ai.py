@@ -73,12 +73,15 @@ async def _resolve_branded(
     if not chain:
         return None
 
+    count = restaurant.serving_count(description)
+
     def build(item: dict[str, Any], confidence: float, note: str) -> resolve.Resolved:
-        # Menus publish per item. Where the portion the model guessed is close to
-        # the published serving, use the serving, so the number the user sees is
-        # the number on the menu rather than that scaled by a guess.
+        # Menus sell units, so the portion is the published serving times however
+        # many were ordered. The model's gram estimate is discarded here on
+        # purpose: asked about a Domino's Margherita it guessed 500 g, and scaling
+        # the published 688 kcal to that gave 1110 for one pizza.
         serving = aggregate.num(item.get("serving_g"), 0.0)
-        portion = serving if serving > 0 and abs(grams - serving) / serving < 0.5 else grams
+        portion = serving * count if serving > 0 else grams
         scaled = usda.scale_to_portion(item, portion)
         return resolve.Resolved(
             name=display_or(item),

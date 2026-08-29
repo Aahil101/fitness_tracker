@@ -162,6 +162,45 @@ def _normalise(text: str) -> str:
 FUZZY_THRESHOLD = 0.82
 
 
+#: Written-out counts people use instead of digits. Ordered, and fractions come
+#: first: "half a pizza" contains "a", so checking whole numbers first read it as
+#: a whole one.
+_WORD_COUNTS: tuple[tuple[str, float], ...] = (
+    ("half", 0.5),
+    ("quarter", 0.25),
+    ("couple", 2.0),
+    ("two", 2.0),
+    ("three", 3.0),
+    ("four", 4.0),
+    ("five", 5.0),
+    ("six", 6.0),
+    ("one", 1.0),
+    ("an", 1.0),
+    ("a", 1.0),
+)
+
+
+def serving_count(text: str) -> float:
+    """How many servings the description asks for.
+
+    Branded portions come from the menu, not from a guess at grams. A chain sells
+    units, so the only thing worth reading out of the description is how many of
+    them — asked for "dominos margarita pizza" the model estimated 500 g, and
+    scaling the published 688 kcal to that produced 1110 for a single pizza.
+    """
+    lowered = _normalise(text)
+    match = re.search(r"\b(\d+(?:\.\d+)?)\b", lowered)
+    if match:
+        value = float(match.group(1))
+        # Guard against a size in the text being read as a count.
+        if 0 < value <= 12:
+            return value
+    for word, value in _WORD_COUNTS:
+        if re.search(rf"\b{word}\b", lowered):
+            return value
+    return 1.0
+
+
 def detect_chain(text: str) -> str | None:
     """Which chain, if any, this description names.
 
