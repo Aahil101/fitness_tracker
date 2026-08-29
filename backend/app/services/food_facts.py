@@ -461,6 +461,20 @@ BASICS: tuple[Fact, ...] = (
     Fact("apple", kcal=52, protein_g=0.3, carbs_g=14.0, fat_g=0.2, serving_g=180),
     Fact("white bread", kcal=265, protein_g=9.0, carbs_g=49.0, fat_g=3.2, serving_g=30,
          aliases=("bread", "bread slice", "sandwich bread")),
+    # A soft white roll. CoFID's "Bread rolls, white, soft" over 10 samples is 254
+    # kcal/100 g; the pav sold with bhaji and misal is the same thing, usually
+    # brushed with butter on the tava, which the serving does not include.
+    #
+    # It is here because of what its absence caused. Asked about misal pav the
+    # model returned "pav (soft yeast dinner rolls, typically served with butter)",
+    # nothing in this table answered to "pav", and the only alias whose words all
+    # appeared in that description was "butter" — so a 60 g roll was priced at
+    # 430 kcal with 48.6 g of fat, and the same meal came out at 459 or 730 kcal
+    # depending on how the model happened to describe the bread.
+    Fact("pav", kcal=254, protein_g=9.3, carbs_g=51.5, fat_g=2.6, serving_g=45,
+         aliases=("pao", "ladi pav", "bread roll", "bread rolls", "dinner roll",
+                  "dinner rolls", "soft roll", "burger bun", "bun"),
+         note="Soft white roll, as sold with bhaji or misal. Butter added on the tava is extra."),
     Fact("peanut butter", kcal=588, protein_g=25.0, carbs_g=20.0, fat_g=50.0, serving_g=15,
          aliases=("peanutbutter",)),
     Fact("almonds", kcal=579, protein_g=21.0, carbs_g=22.0, fat_g=50.0, serving_g=15,
@@ -589,6 +603,34 @@ def _strip_placement(query: str) -> str | None:
     return stem or None
 
 
+#: Dishes this table can only get wrong, because it holds one of their components
+#: and not the dish. "Pav bhaji" is a buttery vegetable mash served with rolls; the
+#: table knows the roll, so a match on it prices a 600 kcal plate at 254 and loses
+#: the bhaji entirely. "Vada pav" and "dal makhani" fail the same way — the second
+#: has been quietly answering 116 kcal, the figure for plain boiled dal, for a dish
+#: finished with cream and butter.
+#:
+#: They are declined rather than estimated here because the butter is most of the
+#: difference and varies enormously between kitchens, so any single figure would be
+#: confidently wrong. Declining sends them to the model, which prices the whole
+#: description and says it is an estimate. An entry should be added the moment
+#: there is a figure worth trusting.
+_UNPRICEABLE_COMPOUNDS = frozenset(
+    {
+        "pav bhaji",
+        "vada pav",
+        "misal pav",
+        "dal makhani",
+        "dal fry",
+        "dal tadka",
+        "chole bhature",
+        "aloo paratha",
+        "paneer butter masala",
+        "butter chicken",
+    }
+)
+
+
 def lookup(query: str) -> Fact | None:
     """Best curated entry for a food name, or None.
 
@@ -606,6 +648,11 @@ def lookup(query: str) -> Fact | None:
 
     normalised = _normalise(query)
     if not normalised:
+        return None
+
+    # A dish we hold only a component of. Answering with the component is worse
+    # than not answering: it drops the rest of the plate.
+    if normalised in _UNPRICEABLE_COMPOUNDS:
         return None
 
     # 1. Exact alias.
@@ -635,17 +682,30 @@ def lookup(query: str) -> Fact | None:
     #    the longer one won, so a spoonful of sugar was priced as a cup of tea —
     #    1.5 kcal instead of 15.5. What settles it is whether the alias is *about*
     #    the same thing: its own head noun has to be the query's head noun.
+    #
+    #    That test ranked candidates but did not admit them, which left the door
+    #    open when there was only one. The model names a food and then describes
+    #    it — "pav (soft yeast dinner rolls, typically served with butter)" — and
+    #    every word of that ends up in the query, so the alias "butter" qualified,
+    #    was the only candidate, and won by default: a 60 g bread roll priced at
+    #    430 kcal with 48.6 g of fat. So an alias now has to account for the head
+    #    noun at all. It need not be the alias's own subject, because "milk tea
+    #    with sugar" has the head noun "milk" and belongs to "tea with milk and
+    #    sugar" — it just has to be in there somewhere.
     candidates: list[tuple[int, int, int, Fact]] = []
     for alias, alias_tokens, alias_head, fact in _INDEX:
-        if alias_tokens and alias_tokens <= query_tokens:
-            candidates.append(
-                (
-                    1 if head and alias_head == head else 0,  # same subject
-                    len(alias_tokens),  # then: more of the query accounted for
-                    len(alias),
-                    fact,
-                )
+        if not alias_tokens or not alias_tokens <= query_tokens:
+            continue
+        if head and head not in alias_tokens:
+            continue
+        candidates.append(
+            (
+                1 if head and alias_head == head else 0,  # same subject
+                len(alias_tokens),  # then: more of the query accounted for
+                len(alias),
+                fact,
             )
+        )
     if candidates:
         candidates.sort(key=lambda entry: (-entry[0], -entry[1], -entry[2]))
         return candidates[0][3]
