@@ -460,7 +460,11 @@ tea, and using it for chai loses half the energy in the cup.
 * quantity_text echoes the user's own wording for that item, so they can see how
   their phrasing was read.
 * usda_query is a plain search phrase for a nutrition database: no counts, no
-  units, no brand names. "grilled chicken breast", not "1 piece grilled chicken".
+  units. "grilled chicken breast", not "1 piece grilled chicken".
+* KEEP the restaurant's name in food_name when the user names one — "Domino's
+  Margherita pizza", "McDonald's McAloo Tikki". Chains publish their own figures
+  and we look them up, which is only possible if the brand survives. Dropping it
+  turned a Domino's Margherita into a generic homemade pizza, out by 300 kcal.
 * confidence is 0-1: high when the food and amount are both explicit, low when
   you inferred the portion.
 * If nothing edible is described, return an empty items array and say why in notes.

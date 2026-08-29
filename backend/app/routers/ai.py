@@ -61,7 +61,7 @@ async def ai_status() -> dict[str, Any]:
 
 
 async def _resolve_branded(
-    ctx: UserContext, *, description: str, grams: float
+    ctx: UserContext, *, description: str, original_text: str = "", grams: float
 ) -> resolve.Resolved | None:
     """A named chain item, priced from what the chain publishes.
 
@@ -69,9 +69,13 @@ async def _resolve_branded(
     Gemini requests the free tier allows per day, shared with ordinary meal
     parsing. Uncached, a few pizzas would exhaust the day.
     """
-    chain = restaurant.detect_chain(description)
+    # Look in the parsed name first, then in what the user actually typed.
+    chain = restaurant.detect_chain(description) or restaurant.detect_chain(original_text)
     if not chain:
         return None
+
+    # Matching uses both, so a brand the parser dropped is still available.
+    haystack = f"{description} {original_text}".strip()
 
     count = restaurant.serving_count(description)
 
@@ -101,7 +105,7 @@ async def _resolve_branded(
         return str(item.get("name") or description)[:200]
 
     # Checked figures.
-    known = restaurant.lookup_known(description, chain)
+    known = restaurant.lookup_known(haystack, chain)
     if known:
         return build(known.as_item(), known.confidence, known.source)
 
@@ -116,14 +120,20 @@ async def _resolve_branded(
         },
     )
     if cached and restaurant.detect_chain(str(cached.get("name") or "")) == chain:
-        tokens = {w for w in re.findall(r"[a-z]+", description.lower()) if len(w) > 2}
+        tokens = {w for w in re.findall(r"[a-z]+", haystack.lower()) if len(w) > 2}
         cached_tokens = {w for w in re.findall(r"[a-z]+", str(cached.get("name") or "").lower())}
         # Only reuse a cached row that is the same menu item, not merely the same
         # chain — otherwise every Domino's order would be priced as the last one.
         if tokens and len(tokens & cached_tokens) >= max(1, len(tokens) - 2):
             return build(cached, 0.8, f"{chain} published figures (cached)")
 
-    published = await restaurant.lookup_published(description, chain)
+    try:
+        published = await restaurant.lookup_published(haystack, chain)
+    except AppError as exc:
+        # Out of lookup quota, most likely. Fall through to the generic sources
+        # rather than failing the request: an approximate pizza beats no meal.
+        log.info("Branded lookup unavailable for %r: %s", haystack, exc.detail)
+        return None
     if published is None:
         return None
 
@@ -136,7 +146,7 @@ async def _resolve_branded(
 
 
 async def _resolve_recognised_item(
-    ctx: UserContext, raw: dict[str, Any]
+    ctx: UserContext, raw: dict[str, Any], original_text: str = ""
 ) -> RecognisedFood:
     """Price one food, in descending order of how much the source can be trusted.
 
@@ -173,7 +183,17 @@ async def _resolve_recognised_item(
     # composition table can reproduce it: a generic pizza entry and a Domino's
     # Peppy Paneer differ by hundreds of calories. Checked figures first, then a
     # cached lookup, then a grounded search — see services/restaurant.py.
-    decided = await _resolve_branded(ctx, description=f"{name} {query}", grams=grams)
+    # The user's own wording is included deliberately. Asked about "dominos
+    # margarita pizza" the parser returned a food_name of just "margherita pizza",
+    # dropping the brand, so anything reading only the parsed item cannot tell it
+    # was a menu item at all.
+    quantity = str(raw.get("quantity_text") or "")
+    decided = await _resolve_branded(
+        ctx,
+        description=" ".join(filter(None, [name, query, quantity])),
+        original_text=original_text,
+        grams=grams,
+    )
 
     # -- 1. our own table. A hit here is final. --------------------------------
     if decided is None:
@@ -419,7 +439,11 @@ async def food_text(
             "the amount, for example 'half cup of tea with 1 spoon of sugar'."
         )
 
-    items = [await _resolve_recognised_item(ctx, raw) for raw in raw_items[:8] if isinstance(raw, dict)]
+    items = [
+        await _resolve_recognised_item(ctx, raw, original_text=payload.text)
+        for raw in raw_items[:8]
+        if isinstance(raw, dict)
+    ]
 
     if any(i.resolution == "unresolved" for i in items):
         warnings.append("Some items could not be matched to nutrition data — check them before saving.")
