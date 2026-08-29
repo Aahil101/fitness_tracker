@@ -43,6 +43,10 @@ USDA_MATCHES = {
     "ghee": {"fdc_id": "3", "name": "Ghee", "calories_per_100g": 900.0},
     # What FDC actually returns for "idli": the packet, at dry-weight density.
     "idli": {"fdc_id": "4", "name": "Idli Mix", "calories_per_100g": 360.0},
+    # Deliberately outside the curated table, so the database and estimate paths
+    # are still reachable in tests. Anything the table answers never gets here.
+    "grilled fish": {"fdc_id": "5", "name": "Fish, grilled", "calories_per_100g": 180.0},
+    "thalipeeth": {"fdc_id": "6", "name": "Thalipeeth Mix", "calories_per_100g": 355.0},
 }
 
 
@@ -68,7 +72,8 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch):
     return install
 
 
-def test_typed_meal_becomes_items_with_usda_nutrition(client, stub_ai):
+def test_typed_meal_becomes_items_with_nutrition(client, stub_ai):
+    """Text in, priced items out. Tea and sugar are both in the curated table."""
     seen = stub_ai(TEA_AND_SUGAR)
 
     resp = client.post("/api/ai/food-text", json={"text": "half cup of tea with 1 spoon"})
@@ -78,18 +83,36 @@ def test_typed_meal_becomes_items_with_usda_nutrition(client, stub_ai):
     assert [i["food_name"] for i in body["items"]] == ["tea", "sugar"]
 
     tea, sugar = body["items"]
-    # 34 kcal/100g at 120g, and 400 kcal/100g at 4g.
     assert tea["portion_g"] == 120
-    assert tea["calories"] == pytest.approx(40.8, abs=0.2)
-    assert tea["resolution"] == "usda"
+    assert tea["resolution"] == "curated"
+    # A cup of tea logged from a bare "tea" is read as the milky sweet kind,
+    # because that is what people mean and 1 kcal is the answer that ruined a
+    # user's day. 38 kcal/100 g at 120 g.
+    assert tea["calories"] == pytest.approx(45.6, abs=0.5)
     assert sugar["portion_g"] == 4
-    assert sugar["calories"] == pytest.approx(16.0, abs=0.2)
+    assert sugar["calories"] == pytest.approx(15.5, abs=0.5)
 
-    assert body["total_calories"] == pytest.approx(56.8, abs=0.5)
     assert body["meal_type"] == "snack"
     assert seen["prompts"] == ["half cup of tea with 1 spoon"]
-    # the model's search phrases, not the user's wording, reach USDA
-    assert seen["queries"] == ["tea", "sugar"]
+
+
+def test_search_phrases_rather_than_user_wording_reach_the_database(client, stub_ai):
+    """Only for foods the curated table does not answer — it never calls out."""
+    seen = stub_ai(
+        {
+            "items": [
+                {
+                    "food_name": "grilled fish",
+                    "usda_query": "grilled fish",
+                    "estimated_grams": 150,
+                    "confidence": 0.8,
+                    "fallback_calories_per_100g": 170,
+                }
+            ]
+        }
+    )
+    client.post("/api/ai/food-text", json={"text": "a big piece of grilled fish"})
+    assert seen["queries"] == ["grilled fish"]
 
 
 def test_the_endpoint_only_drafts_and_never_writes_a_log(client, stub_ai, queries):
@@ -146,13 +169,14 @@ def test_blank_and_overlong_text_are_rejected_before_reaching_the_model(client, 
 
 
 
-# A South Indian breakfast: USDA carries ghee and egg but not pongal, which is
-# the common case for regional and homemade dishes.
+# A South Indian meal where the main dish is in neither USDA nor our own table —
+# the common case for regional and homemade cooking. Undhiyu stands in for it;
+# pongal itself is now curated and would never reach the estimate path.
 PONGAL_MEAL: dict[str, Any] = {
     "items": [
         {
-            "food_name": "pongal",
-            "usda_query": "pongal",
+            "food_name": "undhiyu",
+            "usda_query": "undhiyu",
             "estimated_grams": 150,
             "confidence": 0.7,
             "quantity_text": "1 small cup",
@@ -192,32 +216,37 @@ def test_dish_missing_from_usda_falls_back_to_an_estimate_not_a_dead_end(client,
     assert pongal["fdc_id"] is None, "an estimate must not claim a database id"
     assert "estimate" in (pongal["notes"] or "").lower()
 
-    # ghee is in USDA, so it must still prefer the database over the estimate
+    # Ghee is a known quantity either way — curated and USDA agree at 900
+    # kcal/100 g — so what matters is that it is priced, not which layer won.
     ghee = body["items"][1]
-    assert ghee["resolution"] == "usda"
-    assert ghee["calories"] == pytest.approx(45.0, abs=0.5), "USDA's 900 kcal/100g at 5g"
+    assert ghee["resolution"] in {"curated", "usda"}
+    assert ghee["calories"] == pytest.approx(45.0, abs=0.5), "900 kcal/100g at 5g"
 
 
 def test_usda_wins_when_its_numbers_are_plausible(client, stub_ai):
-    """A database row beats an estimate — as long as it is the same food."""
+    """A database row beats an estimate — as long as it is the same food.
+
+    Uses grilled fish rather than tea: anything in the curated table is settled
+    before the database is consulted, so a curated food cannot test this.
+    """
     stub_ai(
         {
             "items": [
                 {
-                    "food_name": "tea",
-                    "usda_query": "tea",
+                    "food_name": "grilled fish",
+                    "usda_query": "grilled fish",
                     "estimated_grams": 100,
                     "confidence": 0.9,
-                    # close to USDA's 34 kcal/100g, so the row is trusted
-                    "fallback_calories_per_100g": 30,
+                    # close to USDA's 180 kcal/100g, so the row is trusted
+                    "fallback_calories_per_100g": 170,
                 }
             ]
         }
     )
 
-    item = client.post("/api/ai/food-text", json={"text": "a cup of tea"}).json()["items"][0]
+    item = client.post("/api/ai/food-text", json={"text": "grilled fish"}).json()["items"][0]
     assert item["resolution"] == "usda"
-    assert item["calories"] == pytest.approx(34.0, abs=0.5), "USDA's figure, not the estimate"
+    assert item["calories"] == pytest.approx(180.0, abs=0.5), "USDA's figure, not the estimate"
 
 
 def test_a_dry_mix_matched_to_a_cooked_dish_is_rejected(client, stub_ai):
@@ -228,13 +257,17 @@ def test_a_dry_mix_matched_to_a_cooked_dish_is_rejected(client, stub_ai):
     then priced a cooked portion at dry weight — about 360 kcal/100 g against 120
     for the food actually eaten. An energy density that far from the model's own
     estimate means a different food, so the estimate is used instead.
+
+    Uses thalipeeth rather than idli because idli is now in the curated table and
+    never reaches the database at all — a stronger fix for the same problem, but
+    it means the guard itself needs an uncurated dish to be tested on.
     """
     stub_ai(
         {
             "items": [
                 {
-                    "food_name": "idli",
-                    "usda_query": "idli",
+                    "food_name": "thalipeeth",
+                    "usda_query": "thalipeeth",
                     "estimated_grams": 110,
                     "confidence": 0.8,
                     "fallback_calories_per_100g": 120,
@@ -243,7 +276,7 @@ def test_a_dry_mix_matched_to_a_cooked_dish_is_rejected(client, stub_ai):
         }
     )
 
-    item = client.post("/api/ai/food-text", json={"text": "2 idli"}).json()["items"][0]
+    item = client.post("/api/ai/food-text", json={"text": "2 thalipeeth"}).json()["items"][0]
     assert item["resolution"] == "estimated", "the dry mix must not be used"
     assert item["calories"] == pytest.approx(132.0, abs=1.0), "110g at the estimated 120/100g"
     assert item["fdc_id"] is None

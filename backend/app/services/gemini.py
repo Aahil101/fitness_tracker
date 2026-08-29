@@ -94,8 +94,18 @@ Regional and homemade dishes are often missing from USDA — pongal, idli, upma,
 sambar, poha and the like. So for every item also give your own per-100g estimate
 in fallback_calories_per_100g, fallback_protein_per_100g, fallback_carbs_per_100g
 and fallback_fat_per_100g, based on how the dish is normally made. These are used
-only when the database has no match, and are shown to the user as an estimate, so
-give your best honest figures rather than round numbers.
+when the database has no match, and are compared against it when it does, so give
+your best honest figures rather than round numbers.
+
+Also give item_calories: the energy of that entry's entire portion, in kcal. It
+should equal fallback_calories_per_100g x estimated_grams / 100, and stating it
+separately is a check on both.
+
+Finally give total_calories_estimate: the energy of everything described, judged
+as a whole. Work it out from the description directly rather than by adding up
+your items, because its purpose is to catch a breakdown that dropped something.
+A cup of milky sweet tea is roughly 90 kcal; two rotis with dal about 350; a
+plate of idli with sambar about 300.
 """
 
 ASSISTANT_SYSTEM_PROMPT = """You are the in-app fitness and nutrition coach for a personal tracking app.
@@ -367,6 +377,11 @@ MEAL_TEXT_SCHEMA: dict[str, Any] = {
                     "fallback_carbs_per_100g": {"type": "NUMBER"},
                     "fallback_fat_per_100g": {"type": "NUMBER"},
                     "quantity_text": {"type": "STRING"},
+                    # Absolute energy for this entry's whole portion. Required
+                    # alongside the per-100g figure because it is a far easier
+                    # number to be right about, and because it gives the resolver
+                    # something independent to check a database row against.
+                    "item_calories": {"type": "NUMBER"},
                 },
                 # The calorie fallback is required: if the model omits it, a dish
                 # USDA does not carry silently becomes a dead entry again.
@@ -376,13 +391,19 @@ MEAL_TEXT_SCHEMA: dict[str, Any] = {
                     "estimated_grams",
                     "confidence",
                     "fallback_calories_per_100g",
+                    "item_calories",
                 ],
             },
         },
         "meal_type": {"type": "STRING"},
         "notes": {"type": "STRING"},
+        # Energy for the whole description, judged as a whole rather than summed.
+        # This is the only figure in the response derived independently of the
+        # item breakdown, which makes it the one thing capable of catching a
+        # breakdown that has silently lost an ingredient.
+        "total_calories_estimate": {"type": "NUMBER"},
     },
-    "required": ["items"],
+    "required": ["items", "total_calories_estimate"],
 }
 
 MEAL_TEXT_PROMPT = """You convert a written description of a meal into structured food items.
@@ -409,6 +430,26 @@ Rules:
 * "1 spoon" alongside tea or coffee means sugar unless another food is named.
 * Where the food is implied rather than stated (sugar in tea, oil for frying),
   include it as its own item so the calories are not lost.
+
+NEVER put qualifiers in food_name. Write "tea with milk and sugar", not
+"tea (with milk and sugar)". A name in brackets reads to the nutrition database
+as the bare food, and "tea" on its own is one calorie — a milky sweet cup is
+ninety. This exact mistake once logged a user's chai as 1 kcal.
+
+The energy you give must describe the food EXACTLY as you named it, everything
+in the name included. Two consistent ways to handle a drink or dish with
+additions, and you must pick one:
+  (a) One entry named for the whole thing, priced for the whole thing:
+      "tea with milk and sugar", 200 g, about 38 kcal per 100 g.
+  (b) Separate entries, one per component, each priced as itself:
+      "black tea" 170 g at 1 kcal per 100 g, "whole milk" 30 g at 61,
+      "sugar" 5 g at 387.
+What you must never do is name it (a) and price it (b), or name it (a) and then
+forget the milk. Either of those loses almost all of the energy.
+
+Sanity-check yourself before answering: milk, sugar, ghee, butter, oil, cream,
+cheese, nuts and coconut all carry real energy. If your entry mentions one and
+comes out near zero, you have made this mistake.
 * estimated_grams is the total for that entry, counting every unit of it.
 * quantity_text echoes the user's own wording for that item, so they can see how
   their phrasing was read.

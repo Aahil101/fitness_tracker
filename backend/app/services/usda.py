@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -93,6 +94,93 @@ UNPREPARED_MARKERS = (
 # validation errors come back as JSON and are not retried.
 RETRY_STATUSES = frozenset({400, 500, 502, 503, 504})
 RETRY_DELAY_S = 0.6
+
+# Words that make a row a different *kind* of food from anything a person
+# describes as a meal. FDC answered "jowar chilla" with "Chilla In Vanilla Bean
+# Flavor Keto Frozen Dessert" — it shares the word "chilla", so token overlap
+# alone accepted it, and the entry looked plausible enough to ship 16.8 g of fat
+# for a savoury pancake. A match may not introduce one of these categories unless
+# the query asked for it.
+CATEGORY_CONFLICTS = (
+    "dessert",
+    "frozen",
+    "ice cream",
+    "candy",
+    "chocolate",
+    "cookie",
+    "biscuit",
+    "cake",
+    "syrup",
+    "soda",
+    "soft drink",
+    "energy drink",
+    "supplement",
+    "protein bar",
+    "keto",
+    "infant",
+    "baby food",
+    "pet",
+    "dog",
+    "cat food",
+    "sauce, ",
+    "seasoning",
+    "flavoring",
+    "flavouring",
+    "extract",
+)
+
+# Words carrying no discriminating power when judging whether a match is about the
+# same food as the query.
+_STOPWORDS = frozenset(
+    {
+        "a", "an", "the", "of", "with", "without", "and", "or", "in", "on", "for",
+        "plain", "fresh", "cooked", "prepared", "homemade", "home", "made", "style",
+        "type", "food", "dish", "hot", "cold", "regular", "original", "classic",
+        "added", "not", "no", "from", "made with", "includes",
+    }
+)
+
+
+def _content_words(text: str) -> set[str]:
+    """Discriminating words of a food name, singularised the same way both sides."""
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", (text or "").lower())
+    words = set()
+    for word in cleaned.split():
+        if word in _STOPWORDS or len(word) < 3 or word.isdigit():
+            continue
+        if len(word) >= 4 and word.endswith("s") and not word.endswith(("ss", "us")):
+            word = word[:-1]
+        words.add(word)
+    return words
+
+
+def is_relevant(query: str, candidate_name: str) -> bool:
+    """Is this row plausibly the food that was asked for?
+
+    ``best_match`` used to return whatever sorted first, with no test of whether
+    the row had anything to do with the query. Two conditions now have to hold:
+    the match must share a discriminating word with the query, and it must not
+    drag in a food category the query never mentioned.
+
+    Deliberately a cheap syntactic check rather than anything clever. It is a
+    filter against nonsense, not a ranking function — the goal is that a wrong
+    answer becomes "no answer" so a later layer can supply a sane one.
+    """
+    query_words = _content_words(query)
+    match_words = _content_words(candidate_name)
+    if not query_words or not match_words:
+        return False
+
+    if not (query_words & match_words):
+        return False
+
+    lowered_query = (query or "").lower()
+    lowered_match = (candidate_name or "").lower()
+    for conflict in CATEGORY_CONFLICTS:
+        if conflict in lowered_match and conflict not in lowered_query:
+            return False
+
+    return True
 
 
 def _as_float(value: Any) -> float | None:
@@ -285,9 +373,24 @@ async def get_food(fdc_id: str) -> dict[str, Any] | None:
 
 
 async def best_match(query: str) -> dict[str, Any] | None:
-    """Single best FDC match — used by the photo pipeline."""
-    results = await search_foods(query, page_size=5)
-    return results[0] if results else None
+    """Best FDC row that is actually about the food asked for, or None.
+
+    Returning ``results[0]`` unconditionally is how a savoury sorghum pancake
+    became a keto frozen dessert. Rows are now screened for relevance and the
+    first survivor wins; if none survive, the caller falls through to a source
+    that can give an honest answer instead of a confident wrong one.
+    """
+    results = await search_foods(query, page_size=10)
+    for row in results:
+        if is_relevant(query, row.get("name") or ""):
+            return row
+    if results:
+        log.info(
+            "No relevant USDA match for %r; best candidate was %r",
+            query,
+            results[0].get("name"),
+        )
+    return None
 
 
 def scale_to_portion(item: dict[str, Any], grams: float) -> dict[str, float | None]:

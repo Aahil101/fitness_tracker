@@ -21,7 +21,7 @@ from ..schemas import (
     InsightRequest,
     RecognisedFood,
 )
-from ..services import aggregate, gemini, insights, text_ai, usda
+from ..services import aggregate, gemini, insights, resolve, text_ai, usda
 from ..services.forecast import forecast as run_forecast
 from .food import ensure_food_item
 
@@ -62,69 +62,22 @@ async def ai_status() -> dict[str, Any]:
 async def _resolve_recognised_item(
     ctx: UserContext, raw: dict[str, Any]
 ) -> RecognisedFood:
-    """cache -> USDA -> unresolved, then scale to the estimated portion."""
+    """Price one food, in descending order of how much the source can be trusted.
+
+    curated table -> cached row -> USDA -> the model's own estimate, with every
+    database row screened for relevance and density agreement, and a plausibility
+    floor applied to whatever survives.
+
+    The order matters and so does the screening. Previously USDA won by default
+    and was only rejected if it disagreed with the model, which cannot catch the
+    two of them being wrong together — the failure that logged milky sweet tea as
+    1 kcal.
+    """
     name = str(raw.get("food_name") or "Unknown food").strip()[:200]
     query = str(raw.get("usda_query") or name).strip()[:120]
     grams = max(1.0, min(5000.0, aggregate.num(raw.get("estimated_grams"), 100.0)))
     confidence = max(0.0, min(1.0, aggregate.num(raw.get("confidence"), 0.5)))
     preparation = raw.get("preparation")
-
-    item: dict[str, Any] | None = None
-    resolution = "unresolved"
-    food_item_id: str | None = None
-
-    cached = await ctx.db.select_one(
-        "food_items",
-        {
-            "select": "*",
-            "name": f"ilike.{query}*",
-            "calories_per_100g": "not.is.null",
-            "order": "created_at.asc",
-        },
-    )
-    if cached:
-        item, resolution, food_item_id = cached, "cache", cached.get("id")
-    else:
-        match = await usda.best_match(query)
-        if match:
-            item, resolution = match, "usda"
-            food_item_id = await ensure_food_item(ctx.db, match)
-
-    # A database row is only better than the model's estimate if it is the right
-    # food. FDC matched "Idli Mix" for steamed idli and raw rice for cooked rice,
-    # pricing a portion at dry-weight density — roughly 370 kcal/100 g against
-    # about 120 for the food actually eaten. Comparing the two densities catches
-    # that without having to enumerate the dishes it happens to: a disagreement
-    # this wide means the row is a different food, so the estimate wins.
-    model_per_100g = aggregate.num(raw.get("fallback_calories_per_100g"), 0.0)
-    if item and model_per_100g > 0:
-        row_per_100g = aggregate.num(item.get("calories_per_100g"), 0.0)
-        if row_per_100g > 0:
-            ratio = row_per_100g / model_per_100g
-            if ratio > DENSITY_DISAGREEMENT or ratio < 1 / DENSITY_DISAGREEMENT:
-                log.info(
-                    "Rejecting USDA match %r for %r: %.0f vs %.0f kcal/100g",
-                    item.get("name"), query, row_per_100g, model_per_100g,
-                )
-                item, resolution, food_item_id = None, "estimated", None
-
-    macros: dict[str, Any] = {}
-    if item:
-        macros = usda.scale_to_portion(item, grams)
-    elif model_per_100g > 0:
-        # USDA is US-centric, so regional and homemade dishes routinely miss —
-        # pongal, idli, upma, sambar. Rather than hand back an entry with no
-        # numbers for the user to fill in, fall back to the model's own per-100g
-        # estimate. Flagged as "estimated" so the UI can label it honestly and
-        # never pass it off as database-backed.
-        factor = grams / 100
-        resolution = "estimated"
-        macros = {
-            "calories": round(model_per_100g * factor, 1),
-            "protein_g": round(aggregate.num(raw.get("fallback_protein_per_100g"), 0.0) * factor, 1),
-            "carbs_g": round(aggregate.num(raw.get("fallback_carbs_per_100g"), 0.0) * factor, 1),
-            "fat_g": round(aggregate.num(raw.get("fallback_fat_per_100g"), 0.0) * factor, 1),
-        }
 
     display_name = name
     if preparation:
@@ -132,20 +85,114 @@ async def _resolve_recognised_item(
         if prep and prep not in display_name.lower():
             display_name = f"{name} ({prep})"
 
+    # The floor is judged on everything we know the food is, not just its name:
+    # the search phrase and the preparation both carry ingredients the name may
+    # have dropped.
+    description = " ".join(filter(None, [name, query, str(preparation or "")]))
+
+    model_per_100g = aggregate.num(raw.get("fallback_calories_per_100g"), 0.0)
+
+    # -- 1. our own table. A hit here is final. --------------------------------
+    decided = resolve.from_curated(display_name, query, grams)
+
+    # -- 2. a cached row, then USDA. Both are screened the same way. -----------
+    if decided is None:
+        item: dict[str, Any] | None = None
+        resolution = "unresolved"
+        food_item_id: str | None = None
+
+        cached = await ctx.db.select_one(
+            "food_items",
+            {
+                "select": "*",
+                "name": f"ilike.{query}*",
+                "calories_per_100g": "not.is.null",
+                "order": "created_at.asc",
+            },
+        )
+        if cached and usda.is_relevant(query, str(cached.get("name") or "")):
+            item, resolution, food_item_id = cached, "cache", cached.get("id")
+
+        if item is None:
+            match = await usda.best_match(query)
+            if match:
+                item, resolution = match, "usda"
+                food_item_id = await ensure_food_item(ctx.db, match)
+
+        # A row is only better than the estimate if it is the same food. Comparing
+        # densities catches cooked-versus-dry without enumerating the dishes it
+        # happens to: idli against Idli Mix, cooked rice against raw.
+        if item is not None:
+            row_per_100g = aggregate.num(item.get("calories_per_100g"), 0.0)
+            if not resolve.database_agrees(row_per_100g, model_per_100g):
+                log.info(
+                    "Rejecting %s match %r for %r: %.0f vs %.0f kcal/100g",
+                    resolution, item.get("name"), query, row_per_100g, model_per_100g,
+                )
+                item, food_item_id = None, None
+
+        if item is not None:
+            scaled = usda.scale_to_portion(item, grams)
+            decided = resolve.Resolved(
+                name=display_name,
+                grams=grams,
+                calories=aggregate.num(scaled.get("calories"), 0.0),
+                protein_g=aggregate.num(scaled.get("protein_g"), 0.0),
+                carbs_g=aggregate.num(scaled.get("carbs_g"), 0.0),
+                fat_g=aggregate.num(scaled.get("fat_g"), 0.0),
+                fiber_g=scaled.get("fiber_g"),
+                source=resolution,  # type: ignore[arg-type]
+                matched_name=item.get("name"),
+                confidence=confidence,
+                food_item_id=food_item_id,
+            )
+
+    # -- 3. the model's estimate. Imprecise, but never absurd. -----------------
+    if decided is None and model_per_100g > 0:
+        factor = grams / 100
+        decided = resolve.Resolved(
+            name=display_name,
+            grams=grams,
+            calories=round(model_per_100g * factor, 1),
+            protein_g=round(aggregate.num(raw.get("fallback_protein_per_100g"), 0.0) * factor, 1),
+            carbs_g=round(aggregate.num(raw.get("fallback_carbs_per_100g"), 0.0) * factor, 1),
+            fat_g=round(aggregate.num(raw.get("fallback_fat_per_100g"), 0.0) * factor, 1),
+            fiber_g=None,
+            source="estimated",
+            matched_name=None,
+            confidence=confidence,
+        )
+
+    if decided is None:
+        return RecognisedFood(
+            food_name=display_name[:200],
+            portion_g=round(grams, 1),
+            confidence=round(confidence, 2),
+            resolution="unresolved",
+            notes=_resolution_note("unresolved"),
+        )
+
+    # -- 4. the floor, on whatever came out of the above. ---------------------
+    decided = resolve.apply_floor(decided, description)
+
+    note = _resolution_note(decided.source)
+    if decided.notes:
+        note = " ".join(filter(None, [*decided.notes, note]))
+
     return RecognisedFood(
         food_name=display_name[:200],
         portion_g=round(grams, 1),
-        confidence=round(confidence, 2),
-        calories=macros.get("calories"),
-        protein_g=macros.get("protein_g"),
-        carbs_g=macros.get("carbs_g"),
-        fat_g=macros.get("fat_g"),
-        fiber_g=macros.get("fiber_g"),
-        fdc_id=item.get("fdc_id") if item else None,
-        food_item_id=food_item_id,
-        matched_name=item.get("name") if item else None,
-        resolution=resolution,
-        notes=_resolution_note(resolution),
+        confidence=round(decided.confidence, 2),
+        calories=decided.calories,
+        protein_g=decided.protein_g,
+        carbs_g=decided.carbs_g,
+        fat_g=decided.fat_g,
+        fiber_g=decided.fiber_g,
+        fdc_id=None,
+        food_item_id=decided.food_item_id,
+        matched_name=decided.matched_name,
+        resolution=decided.source,
+        notes=note,
     )
 
 

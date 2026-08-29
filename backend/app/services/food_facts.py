@@ -1,0 +1,564 @@
+"""A curated nutrition table, consulted before any database or model.
+
+Why this exists: a user logged "tea with milk and sugar" and the app recorded
+1 kcal. The failure was not a bad database — it was three fallible layers agreeing
+on the same wrong answer. The model named the item "Tea (with milk and sugar)"
+while estimating the energy density of *plain* tea, and USDA's "Tea, brewed" said
+roughly the same, so the cross-check comparing them saw agreement and shipped it.
+
+The lesson is that for the small number of things people log constantly, guessing
+at all is the mistake. A cup of milky sweet tea is about 90 kcal. That is not a
+fact worth deriving twice from unreliable sources on every request — it is a fact
+worth writing down.
+
+So this table is the first thing consulted, and a hit here ends the matter: no
+network call, no model estimate, no fuzzy search, identical answer every time.
+Everything in it is a *prepared* food as actually eaten, and the entries chosen
+are the ones the other layers demonstrably get wrong:
+
+  * Milk-based hot drinks. USDA carries brewed tea and black coffee, which are
+    near-zero, and the milk and sugar routinely go missing.
+  * Indian home cooking. FDC is US-centric: it answers "idli" with "Idli Mix"
+    (dry powder, three times the density of the steamed cake) and "jowar chilla"
+    with a branded keto frozen dessert.
+  * Staples whose cooked and dry weights differ enormously — rice, dal, pasta.
+
+Figures are per 100 g as eaten, from standard composition tables and ordinary
+recipes. They are approximations, but they are *bounded* approximations: none of
+them can be out by a factor of ten, which is the failure this replaces.
+
+Adding an entry is cheap and is the right response to any future report of a
+wrong number on a common food. Keep names lowercase and list every phrasing a
+user might type in ``aliases``.
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True)
+class Fact:
+    """Per-100 g composition of a food as eaten."""
+
+    name: str
+    kcal: float
+    protein_g: float
+    carbs_g: float
+    fat_g: float
+    aliases: tuple[str, ...] = ()
+    #: Typical single serving, so "a cup of chai" needs no volume guesswork.
+    serving_g: float | None = None
+    note: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Hot drinks
+#
+# The category that caused the incident. A "cup of tea" in India is boiled with
+# milk and sugar; in the US it is a near-zero infusion. Both spellings of the
+# intent appear here so neither reading can produce a 1 kcal cup.
+# ---------------------------------------------------------------------------
+DRINKS: tuple[Fact, ...] = (
+    Fact(
+        "tea with milk and sugar",
+        kcal=38,
+        protein_g=1.1,
+        carbs_g=6.0,
+        fat_g=1.1,
+        serving_g=200,
+        aliases=(
+            "chai",
+            "masala chai",
+            "milk tea",
+            "tea with milk",
+            "tea with sugar",
+            "sweet tea with milk",
+            "indian tea",
+            "cutting chai",
+            "doodh patti",
+            "tea milk sugar",
+            "hot tea with milk and sugar",
+        ),
+        note="Boiled with about a third milk and a teaspoon of sugar per cup.",
+    ),
+    Fact(
+        "tea with milk, no sugar",
+        kcal=22,
+        protein_g=1.1,
+        carbs_g=2.0,
+        fat_g=1.1,
+        serving_g=200,
+        aliases=("unsweetened milk tea", "tea with milk no sugar", "sugar free milk tea"),
+    ),
+    Fact(
+        "black tea, unsweetened",
+        kcal=1,
+        protein_g=0.0,
+        carbs_g=0.3,
+        fat_g=0.0,
+        serving_g=200,
+        aliases=("black tea", "green tea", "plain tea", "tea without milk", "herbal tea"),
+        note="Only when milk and sugar are explicitly absent.",
+    ),
+    Fact(
+        "coffee with milk and sugar",
+        kcal=36,
+        protein_g=1.0,
+        carbs_g=5.6,
+        fat_g=1.1,
+        serving_g=200,
+        aliases=(
+            "coffee with milk",
+            "milk coffee",
+            "filter coffee",
+            "south indian coffee",
+            "cafe au lait",
+            "coffee with sugar and milk",
+            "sweet coffee",
+        ),
+    ),
+    Fact(
+        "black coffee, unsweetened",
+        kcal=1,
+        protein_g=0.1,
+        carbs_g=0.0,
+        fat_g=0.0,
+        serving_g=200,
+        aliases=("black coffee", "americano", "plain coffee", "coffee without milk", "espresso"),
+    ),
+    Fact(
+        "cappuccino",
+        kcal=44,
+        protein_g=2.4,
+        carbs_g=4.2,
+        fat_g=1.9,
+        serving_g=180,
+        aliases=("latte", "cafe latte", "flat white"),
+    ),
+    Fact(
+        "whole milk",
+        kcal=61,
+        protein_g=3.2,
+        carbs_g=4.8,
+        fat_g=3.3,
+        serving_g=200,
+        aliases=("milk", "full fat milk", "buffalo milk", "cow milk", "doodh"),
+    ),
+    Fact(
+        "toned milk",
+        kcal=47,
+        protein_g=3.1,
+        carbs_g=4.7,
+        fat_g=1.7,
+        serving_g=200,
+        aliases=("toned milk", "semi skimmed milk", "low fat milk", "skimmed milk"),
+    ),
+    Fact(
+        "sugar",
+        kcal=387,
+        protein_g=0.0,
+        carbs_g=100.0,
+        fat_g=0.0,
+        serving_g=5,
+        aliases=("white sugar", "table sugar", "granulated sugar", "cane sugar", "chini"),
+    ),
+    Fact(
+        "jaggery",
+        kcal=383,
+        protein_g=0.4,
+        carbs_g=98.0,
+        fat_g=0.1,
+        serving_g=10,
+        aliases=("gur", "gud", "palm jaggery"),
+    ),
+    Fact(
+        "buttermilk, salted",
+        kcal=20,
+        protein_g=1.6,
+        carbs_g=2.4,
+        fat_g=0.6,
+        serving_g=250,
+        aliases=("chaas", "chhaas", "salted lassi", "majjige"),
+    ),
+    Fact(
+        "sweet lassi",
+        kcal=95,
+        protein_g=3.1,
+        carbs_g=15.0,
+        fat_g=2.6,
+        serving_g=250,
+        aliases=("lassi", "mango lassi", "sweet curd drink"),
+    ),
+)
+
+# ---------------------------------------------------------------------------
+# Indian staples and home cooking, as served
+# ---------------------------------------------------------------------------
+INDIAN: tuple[Fact, ...] = (
+    Fact(
+        "roti",
+        kcal=264,
+        protein_g=8.1,
+        carbs_g=50.0,
+        fat_g=3.7,
+        serving_g=40,
+        aliases=("chapati", "phulka", "wheat roti", "atta roti", "rotli"),
+    ),
+    Fact(
+        "jowar roti",
+        kcal=250,
+        protein_g=7.0,
+        carbs_g=52.0,
+        fat_g=2.4,
+        serving_g=50,
+        aliases=("jowar bhakri", "sorghum roti", "bhakri", "jolada rotti"),
+    ),
+    Fact(
+        "jowar chilla",
+        kcal=180,
+        protein_g=6.0,
+        carbs_g=28.0,
+        fat_g=4.5,
+        serving_g=90,
+        aliases=("jowar cheela", "sorghum pancake", "jowar pancake", "chilla", "cheela", "besan chilla"),
+        note="Savoury batter pancake cooked with a little oil, not a dessert.",
+    ),
+    Fact(
+        "cooked white rice",
+        kcal=130,
+        protein_g=2.7,
+        carbs_g=28.0,
+        fat_g=0.3,
+        serving_g=160,
+        aliases=("white rice", "steamed rice", "boiled rice", "plain rice", "rice", "chawal", "sadam"),
+        note="Cooked weight. Dry rice is about 350 kcal/100 g — a threefold error.",
+    ),
+    Fact(
+        "cooked brown rice",
+        kcal=123,
+        protein_g=2.7,
+        carbs_g=26.0,
+        fat_g=1.0,
+        serving_g=160,
+        aliases=("brown rice",),
+    ),
+    Fact(
+        "dal, cooked",
+        kcal=116,
+        protein_g=7.0,
+        carbs_g=17.0,
+        fat_g=1.9,
+        serving_g=200,
+        aliases=("dal", "daal", "toor dal", "moong dal", "masoor dal", "lentil curry", "dal tadka", "dal fry", "sambar dal"),
+        note="As served, watered and tempered. Dry dal is roughly 340 kcal/100 g.",
+    ),
+    Fact(
+        "sambar",
+        kcal=65,
+        protein_g=3.0,
+        carbs_g=9.0,
+        fat_g=1.8,
+        serving_g=150,
+        aliases=("sambhar", "saaru"),
+    ),
+    Fact(
+        "rasam",
+        kcal=35,
+        protein_g=1.2,
+        carbs_g=5.0,
+        fat_g=1.0,
+        serving_g=150,
+        aliases=("rasam", "charu"),
+    ),
+    Fact(
+        "idli",
+        kcal=140,
+        protein_g=4.4,
+        carbs_g=28.0,
+        fat_g=0.9,
+        serving_g=50,
+        aliases=("idly", "steamed idli", "rice idli"),
+        note="Steamed. FDC answers this query with dry Idli Mix at three times the density.",
+    ),
+    Fact(
+        "dosa",
+        kcal=168,
+        protein_g=3.9,
+        carbs_g=29.0,
+        fat_g=4.0,
+        serving_g=90,
+        aliases=("plain dosa", "sada dosa", "dosai"),
+    ),
+    Fact(
+        "masala dosa",
+        kcal=185,
+        protein_g=4.0,
+        carbs_g=30.0,
+        fat_g=5.5,
+        serving_g=150,
+        aliases=("masala dosai",),
+    ),
+    Fact(
+        "ven pongal",
+        kcal=155,
+        protein_g=4.5,
+        carbs_g=24.0,
+        fat_g=4.5,
+        serving_g=200,
+        aliases=("pongal", "khara pongal", "ghee pongal", "rice and dal pongal"),
+        note="Rice and moong dal with ghee, pepper and cumin.",
+    ),
+    Fact(
+        "upma",
+        kcal=145,
+        protein_g=3.4,
+        carbs_g=23.0,
+        fat_g=4.2,
+        serving_g=200,
+        aliases=("uppuma", "rava upma", "semolina upma"),
+    ),
+    Fact(
+        "poha",
+        kcal=140,
+        protein_g=2.7,
+        carbs_g=25.0,
+        fat_g=3.4,
+        serving_g=180,
+        aliases=("pohe", "flattened rice", "aval", "kanda poha"),
+    ),
+    Fact(
+        "paratha",
+        kcal=300,
+        protein_g=7.0,
+        carbs_g=45.0,
+        fat_g=10.0,
+        serving_g=70,
+        aliases=("plain paratha", "aloo paratha", "stuffed paratha", "parotta"),
+    ),
+    Fact(
+        "puri",
+        kcal=360,
+        protein_g=6.5,
+        carbs_g=45.0,
+        fat_g=17.0,
+        serving_g=30,
+        aliases=("poori", "fried puri"),
+    ),
+    Fact(
+        "vada",
+        kcal=290,
+        protein_g=8.0,
+        carbs_g=30.0,
+        fat_g=15.0,
+        serving_g=45,
+        aliases=("medu vada", "urad vada", "vadai"),
+    ),
+    Fact(
+        "chicken curry",
+        kcal=145,
+        protein_g=13.0,
+        carbs_g=4.0,
+        fat_g=8.5,
+        serving_g=200,
+        aliases=("chicken masala", "chicken gravy", "murgh curry", "chicken sabzi"),
+    ),
+    Fact(
+        "paneer curry",
+        kcal=190,
+        protein_g=9.0,
+        carbs_g=7.0,
+        fat_g=14.0,
+        serving_g=180,
+        aliases=("paneer butter masala", "palak paneer", "paneer masala", "shahi paneer"),
+    ),
+    Fact(
+        "mixed vegetable curry",
+        kcal=95,
+        protein_g=2.6,
+        carbs_g=10.0,
+        fat_g=5.0,
+        serving_g=180,
+        aliases=("sabzi", "sabji", "veg curry", "vegetable curry", "kootu", "poriyal"),
+    ),
+    Fact(
+        "curd",
+        kcal=60,
+        protein_g=3.1,
+        carbs_g=4.7,
+        fat_g=3.3,
+        serving_g=150,
+        aliases=("yoghurt", "yogurt", "dahi", "plain curd", "thick curd"),
+    ),
+    Fact(
+        "chutney, coconut",
+        kcal=180,
+        protein_g=3.0,
+        carbs_g=8.0,
+        fat_g=15.0,
+        serving_g=40,
+        aliases=("coconut chutney", "chutney"),
+    ),
+    Fact(
+        "biryani, chicken",
+        kcal=180,
+        protein_g=8.5,
+        carbs_g=22.0,
+        fat_g=6.5,
+        serving_g=250,
+        aliases=("chicken biryani", "biryani", "biriyani"),
+    ),
+)
+
+# ---------------------------------------------------------------------------
+# Everyday additions that carry real energy and are easy to lose
+# ---------------------------------------------------------------------------
+BASICS: tuple[Fact, ...] = (
+    Fact("ghee", kcal=900, protein_g=0.0, carbs_g=0.0, fat_g=100.0, serving_g=5,
+         aliases=("clarified butter", "desi ghee")),
+    Fact("butter", kcal=717, protein_g=0.9, carbs_g=0.1, fat_g=81.0, serving_g=10,
+         aliases=("salted butter", "unsalted butter", "makhan")),
+    Fact("vegetable oil", kcal=884, protein_g=0.0, carbs_g=0.0, fat_g=100.0, serving_g=5,
+         aliases=("oil", "sunflower oil", "cooking oil", "groundnut oil", "olive oil", "coconut oil")),
+    Fact("boiled egg", kcal=155, protein_g=13.0, carbs_g=1.1, fat_g=11.0, serving_g=50,
+         aliases=("egg", "hard boiled egg", "egg boiled", "anda")),
+    Fact("omelette", kcal=195, protein_g=13.0, carbs_g=1.5, fat_g=15.0, serving_g=100,
+         aliases=("egg omelette", "masala omelette", "scrambled egg", "egg bhurji")),
+    Fact("grilled chicken breast", kcal=165, protein_g=31.0, carbs_g=0.0, fat_g=3.6, serving_g=120,
+         aliases=("chicken breast", "grilled chicken", "roast chicken breast")),
+    Fact("banana", kcal=89, protein_g=1.1, carbs_g=23.0, fat_g=0.3, serving_g=120,
+         aliases=("kela",)),
+    Fact("apple", kcal=52, protein_g=0.3, carbs_g=14.0, fat_g=0.2, serving_g=180),
+    Fact("white bread", kcal=265, protein_g=9.0, carbs_g=49.0, fat_g=3.2, serving_g=30,
+         aliases=("bread", "bread slice", "sandwich bread")),
+    Fact("peanut butter", kcal=588, protein_g=25.0, carbs_g=20.0, fat_g=50.0, serving_g=15,
+         aliases=("peanutbutter",)),
+    Fact("almonds", kcal=579, protein_g=21.0, carbs_g=22.0, fat_g=50.0, serving_g=15,
+         aliases=("badam", "almond")),
+    Fact("cooked pasta", kcal=158, protein_g=5.8, carbs_g=31.0, fat_g=0.9, serving_g=140,
+         aliases=("pasta", "spaghetti", "penne", "macaroni")),
+    Fact("cooked chickpeas", kcal=164, protein_g=8.9, carbs_g=27.0, fat_g=2.6, serving_g=160,
+         aliases=("chana", "chole", "chickpeas", "garbanzo")),
+    Fact("cooked rajma", kcal=127, protein_g=8.7, carbs_g=23.0, fat_g=0.5, serving_g=180,
+         aliases=("rajma", "kidney beans")),
+)
+
+ALL_FACTS: tuple[Fact, ...] = DRINKS + INDIAN + BASICS
+
+
+def _normalise(text: str) -> str:
+    """Lowercase, strip accents and punctuation, collapse whitespace.
+
+    Also drops parenthesised asides, because the model that caused the incident
+    liked to write "Tea (with milk and sugar)". The words inside matter, so they
+    are kept as plain text rather than discarded — the brackets are the noise,
+    not the content.
+    """
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.lower().replace("(", " ").replace(")", " ")
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+#: Words that carry no discriminating meaning in a food name.
+_FILLER = frozenset(
+    {
+        "a", "an", "the", "of", "with", "and", "some", "cup", "cups", "glass", "bowl",
+        "plate", "piece", "pieces", "small", "medium", "large", "hot", "cold", "fresh",
+        "homemade", "home", "made", "my", "one", "two", "half", "full", "served",
+    }
+)
+
+
+def _stem(word: str) -> str:
+    """Crudest possible singulariser, applied to both sides of every comparison.
+
+    "2 rotis" has to reach the "roti" entry. A real stemmer would be overkill and
+    would start mangling words like "grass"; trimming one trailing s from words of
+    four letters or more is enough for food names, and because aliases go through
+    the same function any distortion is symmetrical and cancels out.
+    """
+    # "ss" and "us" are protected (grass, hummus). An "is" ending is *not*, because
+    # in this domain those are almost all plurals of words ending in i — rotis,
+    # idlis, puris — and excluding them was why "2 rotis" found nothing.
+    if len(word) >= 4 and word.endswith("s") and not word.endswith(("ss", "us")):
+        return word[:-1]
+    return word
+
+
+def _tokens(text: str) -> frozenset[str]:
+    return frozenset(
+        _stem(w)
+        for w in _normalise(text).split()
+        # Bare numbers are counts, not food. "2 rotis" must not fail to match
+        # merely because it says how many.
+        if w not in _FILLER and len(w) > 1 and not w.isdigit()
+    )
+
+
+# Alias -> Fact, built once. Longer aliases are matched first so that
+# "tea with milk and sugar" cannot be captured by the bare alias "tea".
+_INDEX: list[tuple[str, frozenset[str], Fact]] = sorted(
+    (
+        (_normalise(alias), _tokens(alias), fact)
+        for fact in ALL_FACTS
+        for alias in (fact.name, *fact.aliases)
+    ),
+    key=lambda entry: -len(entry[0]),
+)
+
+
+def lookup(query: str) -> Fact | None:
+    """Best curated entry for a food name, or None.
+
+    Deliberately conservative: it will return nothing rather than a loose match,
+    because a wrong curated answer is worse than falling through to USDA. Three
+    passes, in descending strictness.
+    """
+    normalised = _normalise(query)
+    if not normalised:
+        return None
+
+    # 1. Exact alias.
+    for alias, _, fact in _INDEX:
+        if alias == normalised:
+            return fact
+
+    query_tokens = _tokens(query)
+    if not query_tokens:
+        return None
+
+    # 2. Every word of an alias is present in the query. Longest alias wins, so a
+    #    query naming milk and sugar beats the bare "tea" entry.
+    for _alias, alias_tokens, fact in _INDEX:
+        if alias_tokens and alias_tokens <= query_tokens:
+            return fact
+
+    # 3. Every word of the query is present in an alias — catches "chilla" for
+    #    "jowar chilla" but never matches on a single shared filler word.
+    best: tuple[int, Fact] | None = None
+    for _alias, alias_tokens, fact in _INDEX:
+        if alias_tokens and query_tokens <= alias_tokens:
+            overlap = len(query_tokens)
+            if best is None or overlap > best[0]:
+                best = (overlap, fact)
+    return best[1] if best else None
+
+
+def as_item(fact: Fact) -> dict[str, Any]:
+    """Shape a Fact like a resolved nutrition row."""
+    return {
+        "name": fact.name,
+        "calories_per_100g": fact.kcal,
+        "protein_per_100g": fact.protein_g,
+        "carbs_per_100g": fact.carbs_g,
+        "fat_per_100g": fact.fat_g,
+        "fiber_per_100g": None,
+        "serving_g": fact.serving_g,
+        "source": "curated",
+        "note": fact.note,
+    }

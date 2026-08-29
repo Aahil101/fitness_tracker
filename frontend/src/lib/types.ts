@@ -354,7 +354,7 @@ export interface RecognisedFood {
   fdc_id: string | null;
   food_item_id: string | null;
   matched_name: string | null;
-  resolution: 'cache' | 'usda' | 'estimated' | 'unresolved';
+  resolution: 'curated' | 'cache' | 'usda' | 'estimated' | 'unresolved';
   notes: string | null;
 }
 
