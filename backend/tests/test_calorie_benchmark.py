@@ -297,3 +297,48 @@ def test_a_food_we_do_not_have_returns_nothing_rather_than_a_near_miss(query: st
     assert food_facts.lookup(query) is None, (
         f"{query!r} is not in the table and must not be answered by a near miss"
     )
+
+
+
+# ---------------------------------------------------------------------------
+# Database relevance
+# ---------------------------------------------------------------------------
+RELEVANCE_CASES = [
+    # The original garbage match: a savoury sorghum pancake answered with a
+    # branded frozen dessert, accepted because both contain the word "chilla".
+    ("jowar chilla", "Chilla In Vanilla Bean Flavor Keto Frozen Dessert", False),
+    # A plain ingredient must not be answered with a dish built around it.
+    ("grilled fish", "Fish sandwich, grilled", False),
+    ("chicken", "Chicken sandwich", False),
+    ("egg", "Egg sandwich", False),
+    ("milk", "Milk chocolate candy", False),
+    ("oats", "Baby food, oatmeal", False),
+    ("chicken", "Cat food, chicken", False),
+    # Genuine matches must survive, or the gate is worse than no gate.
+    ("grilled fish", "Fish, grilled", True),
+    ("chicken breast", "Chicken breast, roasted", True),
+    ("egg", "Egg, whole, cooked, hard-boiled", True),
+    ("cooked white rice", "Rice, white, cooked", True),
+    ("tea with milk", "Tea, hot, with milk", True),
+    # And asking for the composite must still find the composite.
+    ("chicken sandwich", "Chicken sandwich", True),
+    ("fish burger", "Fish burger", True),
+]
+
+
+@pytest.mark.parametrize(("query", "candidate", "expected"), RELEVANCE_CASES)
+def test_database_rows_are_screened_for_relevance(
+    query: str, candidate: str, expected: bool
+) -> None:
+    """best_match used to return whatever sorted first, related or not.
+
+    The sort discarded the search engine's own relevance ordering in favour of
+    preferring generic data types, so an unrelated row could arrive at the top and
+    be used with full confidence.
+    """
+    from app.services.usda import is_relevant
+
+    assert is_relevant(query, candidate) is expected, (
+        f"{candidate!r} as a match for {query!r} should be "
+        f"{'accepted' if expected else 'refused'}"
+    )
