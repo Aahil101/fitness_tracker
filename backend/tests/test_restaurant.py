@@ -7,6 +7,9 @@ the only correct one for its own product.
 
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
+
 import pytest
 
 from app.services import restaurant
@@ -106,35 +109,62 @@ def test_checked_items_resolve_without_an_api_call() -> None:
     known = restaurant.lookup_known("dominos margherita pizza", "Domino's")
     assert known is not None
     assert known.chain == "Domino's"
-    # Domino's India publishes 688 kcal for a regular Margherita.
+    # Domino's India publishes 687.6 kcal for a regular hand-tossed Margherita.
     assert 600 <= known.kcal <= 780
     assert known.source
 
 
-KNOWN_ITEM_MATCHES = [
-    # Misspellings people actually type must still find the item.
-    ("dominos margarita pizza", True),
-    ("dominos margherita pizza", True),
-    ("dominos margarita", True),
-    # A different pizza must NOT inherit this one's figure. Accepting any overlap
-    # meant a Peppy Paneer matched Margherita on the shared word "pizza" and was
-    # reported as 688 kcal with the chain's name attached.
-    ("1 domonis peppy panner pizza", False),
-    ("dominos peppy paneer pizza", False),
-    ("dominos farmhouse pizza", False),
-    ("dominos cheese pizza", False),
-    ("dominos chicken dominator", False),
+#: Each of these names a different Domino's pizza, and each must come back with
+#: its own published figure. The rule being protected is that a figure is never
+#: lent to a neighbouring item: accepting any word overlap once meant a Peppy
+#: Paneer matched Margherita on the shared word "pizza" and was reported as
+#: 688 kcal with the chain's name attached. Now that the table holds the whole
+#: menu, "does it match at all" no longer tests that — every one of these matches
+#: something — so what is checked is that no two of them land on the same row.
+DISTINCT_DOMINOS_ITEMS = [
+    "dominos margarita pizza",
+    "dominos margherita pizza",
+    "1 domonis peppy panner pizza",
+    "dominos peppy paneer pizza",
+    "dominos farmhouse pizza",
+    "dominos chicken dominator",
+    "dominos veg extravaganza",
+    "dominos indi tandoori paneer",
 ]
 
 
-@pytest.mark.parametrize(("text", "should_match"), KNOWN_ITEM_MATCHES)
-def test_a_checked_figure_is_not_lent_to_a_different_menu_item(
-    text: str, should_match: bool
-) -> None:
-    found = restaurant.lookup_known(text, "Domino's") is not None
-    assert found is should_match, (
-        f"{text!r} {'should' if should_match else 'must not'} match the stored Margherita"
-    )
+@pytest.mark.parametrize("text", DISTINCT_DOMINOS_ITEMS)
+def test_every_named_pizza_finds_its_own_published_figure(text: str) -> None:
+    found = restaurant.lookup_known(text, "Domino's")
+    assert found is not None, f"{text!r} names a pizza Domino's publishes"
+    # The words the person typed have to appear in what they were given back.
+    spoken = {w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 4}
+    matched = found.name.lower()
+    assert any(
+        word in matched or SequenceMatcher(None, word, part).ratio() > 0.8
+        for word in spoken
+        for part in matched.split()
+    ), f"{text!r} resolved to {found.name!r}, which shares none of its words"
+
+
+def test_a_figure_is_never_lent_to_a_neighbouring_item() -> None:
+    """Two different pizzas must not come back as the same row.
+
+    This is the regression that mattered: one entry in the table and a loose
+    match, and every Domino's order was priced as a Margherita.
+    """
+    resolved = {}
+    for text in DISTINCT_DOMINOS_ITEMS:
+        found = restaurant.lookup_known(text, "Domino's")
+        assert found is not None
+        resolved[text] = found.name
+
+    # "margarita" and "margherita" are the same pizza spelled two ways, as are the
+    # two Peppy Paneers, so six distinct rows is the correct answer for eight names.
+    assert len(set(resolved.values())) == 6, resolved
+    assert resolved["dominos margarita pizza"] == resolved["dominos margherita pizza"]
+    assert resolved["1 domonis peppy panner pizza"] == resolved["dominos peppy paneer pizza"]
+    assert resolved["dominos farmhouse pizza"] != resolved["dominos margherita pizza"]
 
 
 def test_a_serving_converts_to_per_100g_without_losing_the_published_figure() -> None:

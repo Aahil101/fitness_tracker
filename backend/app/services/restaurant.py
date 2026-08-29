@@ -33,6 +33,8 @@ import re
 import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from ..config import settings
@@ -108,6 +110,26 @@ class BrandedFood:
     fat_g: float
     source: str
     confidence: float
+    #: A size or crust, where the chain lists several of the same item. Empty when
+    #: the item has only one form.
+    size: str = ""
+    #: What an unqualified mention means: 0 is the form a person gets by default.
+    rank: int = 0
+    #: True when the chain publishes energy but no weight, so the portion weight
+    #: was derived from the energy. The energy is still exactly as published.
+    weight_inferred: bool = False
+
+    @property
+    def provenance(self) -> str:
+        """What to tell the user about where this figure came from."""
+        note = f"{self.serving_description}, {self.source}"
+        if self.weight_inferred:
+            note += (
+                f". {self.chain} publishes the calories but not the weight, so the "
+                f"{self.serving_g:.0f} g shown is worked out from them — adjust it if "
+                "you know better"
+            )
+        return note
 
     def as_item(self) -> dict[str, Any]:
         """Per-serving figures expressed per 100 g, for the shared scaling path.
@@ -127,31 +149,91 @@ class BrandedFood:
             "fiber_per_100g": None,
             "serving_g": grams,
             "source": "brand",
-            "note": self.source,
+            "note": self.provenance,
         }
 
 
 # ---------------------------------------------------------------------------
-# Checked figures for frequently ordered items
+# What the chains publish about their own menus
 #
-# Kept short on purpose. Every entry here is one whose published figure has been
-# confirmed; the grounded lookup handles everything else and caches the result, so
-# there is no need to pad this out with numbers nobody has verified.
+# Built offline by scripts/build_chain_menus.py from each chain's own nutrition
+# data: Domino's India's menu pages, and the McDonald's, Pizza Hut and Taco Bell
+# India nutrition booklets. Loaded from a data file rather than written out here
+# because there are several hundred items and they change with the menu.
+#
+# This replaced a single hand-written entry plus a live grounded lookup for
+# everything else. The lookup is dead on Gemini's free tier — Search grounding is
+# not included, so every key refuses it — and the alternative was showing the
+# model's guess with a brand name attached, which reads as authoritative and is
+# not. These figures are exact, free, instant and the same every time.
 # ---------------------------------------------------------------------------
-KNOWN: tuple[BrandedFood, ...] = (
-    BrandedFood(
-        name="Margherita pizza (regular, hand tossed)",
-        chain="Domino's",
-        serving_description="one regular pizza",
-        serving_g=310.0,
-        kcal=688.0,
-        protein_g=14.0,
-        carbs_g=68.0,
-        fat_g=22.0,
-        source="Domino's India published calorie guide",
-        confidence=0.9,
-    ),
-)
+MENU_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "chain_menus.json"
+
+
+@dataclass(frozen=True)
+class MenuTable:
+    by_chain: dict[str, tuple[BrandedFood, ...]]
+    sources: dict[str, str]
+
+    @property
+    def size(self) -> int:
+        return sum(len(items) for items in self.by_chain.values())
+
+
+@lru_cache(maxsize=1)
+def menu_table() -> MenuTable:
+    """Parsed once per process; a few hundred rows, so it stays in memory."""
+    try:
+        raw = json.loads(MENU_DATA_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        # A missing table must not take food logging down: the caller falls back
+        # to the generic sources exactly as it did before this file existed.
+        log.error("Could not load the chain menu table: %s", exc)
+        return MenuTable(by_chain={}, sources={})
+
+    by_chain: dict[str, tuple[BrandedFood, ...]] = {}
+    sources: dict[str, str] = {}
+    for chain, payload in (raw.get("chains") or {}).items():
+        source = str(payload.get("source") or f"{chain} published figures")
+        sources[chain] = source
+        items = []
+        for row in payload.get("items") or []:
+            kcal = row.get("kcal")
+            if not kcal:
+                continue
+            items.append(
+                BrandedFood(
+                    name=str(row.get("name") or ""),
+                    chain=chain,
+                    serving_description=str(row.get("serving_description") or "one serving"),
+                    serving_g=row.get("serving_g"),
+                    kcal=float(kcal),
+                    protein_g=float(row.get("protein_g") or 0.0),
+                    carbs_g=float(row.get("carbs_g") or 0.0),
+                    fat_g=float(row.get("fat_g") or 0.0),
+                    source=source,
+                    # Published by the chain for its own product, so as certain as
+                    # this app gets. Not 1.0: the match from free text to a menu
+                    # row is still an inference.
+                    confidence=0.95,
+                    size=str(row.get("size") or ""),
+                    rank=int(row.get("rank") or 0),
+                    weight_inferred=bool(row.get("weight_inferred")),
+                )
+            )
+        by_chain[chain] = tuple(items)
+
+    log.info(
+        "Chain menu table loaded: %d items across %d chains",
+        sum(len(v) for v in by_chain.values()),
+        len(by_chain),
+    )
+    return MenuTable(by_chain=by_chain, sources=sources)
+
+
+def known_chains() -> list[str]:
+    """Chains whose published figures we hold. Used by diagnostics."""
+    return sorted(menu_table().by_chain)
 
 
 def _normalise(text: str) -> str:
@@ -253,11 +335,17 @@ def detect_chain(text: str) -> str | None:
 
 
 #: Words that appear in half the menu and so distinguish nothing.
+#:
+#: "veg" and "non" are deliberately absent. On an Indian menu they are the primary
+#: distinction, not filler: Taco Bell lists a Crunchy Taco Supreme in both, 219 and
+#: 241 kcal, and treating them as generic left both entries with identical
+#: distinguishing words, so "crunchy taco supreme veg" resolved to whichever came
+#: first — the non-veg one.
 _GENERIC_PRODUCT_WORDS = frozenset(
     {
         "pizza", "burger", "sandwich", "sub", "wrap", "roll", "meal", "combo",
         "regular", "medium", "large", "small", "classic", "hand", "tossed",
-        "crust", "size", "veg", "non", "chicken", "cheese", "coffee", "shake",
+        "crust", "size", "chicken", "cheese", "coffee", "shake",
     }
 )
 
@@ -267,38 +355,130 @@ _GENERIC_PRODUCT_WORDS = frozenset(
 PRODUCT_WORD_THRESHOLD = 0.8
 
 
-def lookup_known(text: str, chain: str) -> BrandedFood | None:
-    """A checked entry for this item, if there is one.
+def _spoken_words(text: str) -> list[str]:
+    """The words available to match, including neighbours run together.
 
-    Every distinguishing word of the stored product name has to be present, allowing
-    for misspelling. An earlier version accepted any overlap at all, which meant a
-    Peppy Paneer matched the Margherita entry on the shared word "pizza" and was
-    reported as 688 kcal with the chain's name on it. A confident wrong figure
-    under a brand is worse than no figure.
+    Menus close up names that people space out: the item is a McAloo Tikki and the
+    description says "mc aloo tikki". Joining adjacent words recovers that without
+    loosening the per-word comparison, which is what mattered — "aloo" on its own
+    is two characters short of "mcaloo" and a threshold loose enough to bridge that
+    also matched "chicken" to "McChicken", so "mcdonalds butter chicken" came back
+    as a McChicken Burger.
     """
-    tokens = [w for w in _normalise(text).split() if len(w) > 2]
-    if not tokens:
+    words = _normalise(text).split()
+    joined = [words[i] + words[i + 1] for i in range(len(words) - 1)]
+    return [w for w in [*words, *joined] if len(w) > 2]
+
+
+def _same_word(spoken: str, wanted: str) -> bool:
+    """Is this the same word, allowing for how people actually spell things?
+
+    A misspelling substitutes or transposes letters. Adding a couple of letters to
+    the front or back makes a different word: "chicken" is not "mcchicken", "veg"
+    is not "veggie". Both of those score above 0.8 on plain similarity, so
+    containment is checked separately and rules the match out.
+    """
+    if spoken == wanted:
+        return True
+    if abs(len(spoken) - len(wanted)) >= 2 and (spoken in wanted or wanted in spoken):
+        return False
+    return SequenceMatcher(None, spoken, wanted).ratio() >= PRODUCT_WORD_THRESHOLD
+
+#: Sizes, crusts and counts: the words that choose between forms of one product.
+#: Kept apart from the generic list because they are worthless for identifying the
+#: product and decisive for identifying which of its forms was ordered.
+_SIZE_WORDS = frozenset(
+    {
+        "regular", "personal", "medium", "small", "large", "extra",
+        "piece", "pieces", "pcs", "slice", "slices",
+        "burst", "pan", "thin", "wheat", "stuffed", "wholewheat",
+    }
+)
+
+
+def _product_of(name: str) -> str:
+    """The item without its bracketed size or crust: what the person names."""
+    return re.sub(r"\s*\([^)]*\)", "", name).strip()
+
+
+def _variant_of(name: str) -> str:
+    return " ".join(re.findall(r"\(([^)]*)\)", name))
+
+
+def lookup_known(text: str, chain: str) -> BrandedFood | None:
+    """The chain's published figures for this item, if we hold them.
+
+    Two decisions, in order.
+
+    Which product. Every distinguishing word of the stored product name has to be
+    present, allowing for misspelling. An earlier version accepted any overlap at
+    all, which meant a Peppy Paneer matched the Margherita entry on the shared word
+    "pizza" and was reported as 688 kcal with the chain's name on it. A confident
+    wrong figure under a brand is worse than no figure. Requiring all of them also
+    settles "double cheese margherita" in favour of that product over plain
+    Margherita, because it is the more specific match that still fits.
+
+    Then which form of it. Chains list the same pizza in three sizes and four
+    crusts, 440 to 2,035 kcal for a Margherita, so this cannot be left to whichever
+    row comes first. A size or crust named in the description wins; otherwise the
+    lowest-ranked form is used, which is the one the menu treats as standard.
+    """
+    spoken = _spoken_words(text)
+    if not spoken:
         return None
 
     def present(word: str) -> bool:
-        return any(
-            token == word or SequenceMatcher(None, token, word).ratio() >= PRODUCT_WORD_THRESHOLD
-            for token in tokens
-        )
+        return any(_same_word(said, word) for said in spoken)
 
-    best: tuple[int, BrandedFood] | None = None
-    for item in KNOWN:
-        if item.chain != chain:
-            continue
-        product = _normalise(re.sub(r"\(.*?\)", "", item.name))
+    best_specificity = 0
+    candidates: list[BrandedFood] = []
+    for item in menu_table().by_chain.get(chain, ()):
+        product = _normalise(_product_of(item.name))
         distinctive = [
             w for w in product.split() if len(w) > 2 and w not in _GENERIC_PRODUCT_WORDS
         ]
         if not distinctive or not all(present(word) for word in distinctive):
             continue
-        if best is None or len(distinctive) > best[0]:
-            best = (len(distinctive), item)
-    return best[1] if best else None
+        if len(distinctive) > best_specificity:
+            best_specificity, candidates = len(distinctive), [item]
+        elif len(distinctive) == best_specificity:
+            candidates.append(item)
+
+    if not candidates:
+        return None
+    return _pick_variant(candidates, _normalise(text).split())
+
+
+def _pick_variant(candidates: list[BrandedFood], said: list[str]) -> BrandedFood:
+    """Among forms of the same product, the one the description asks for.
+
+    Scored on the whole normalised description rather than the filtered product
+    tokens, because the words that pick a form are exactly the ones product
+    matching throws away: the sizes, and the piece counts. "6 piece chicken
+    mcnuggets" was resolving to the 4 piece box at 170 kcal because the token list
+    dropped everything shorter than three characters, so the 6 was never seen.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+
+    spoken = set(said)
+
+    def score(item: BrandedFood) -> tuple[int, int]:
+        # The stored size is the expanded form, which matters because McDonald's
+        # writes drink sizes as a single letter: "Latte (L)" normalises to "latte
+        # l", and nobody types "l", so "large latte" was resolving to the regular.
+        words = set(_normalise(item.size).split())
+        words |= {
+            word
+            for word in _normalise(_variant_of(item.name)).split()
+            if word in _SIZE_WORDS or word.isdigit()
+        }
+        # Counts are written into the name for McDonald's boxes of nuggets.
+        words |= set(re.findall(r"\d+", item.name))
+        # Negative rank so that, at equal evidence, the standard form sorts first.
+        return len(words & spoken), -item.rank
+
+    return max(candidates, key=score)
 
 
 PROMPT = """You look up the nutrition a restaurant chain publishes for its own menu items.
