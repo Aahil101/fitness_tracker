@@ -185,11 +185,13 @@ DRINKS: tuple[Fact, ...] = (
         aliases=("chaas", "chhaas", "salted lassi", "majjige"),
     ),
     Fact(
+        # Measured at 65 by CoFID against our 95. Ours assumed full-fat curd and a
+        # generous hand with the sugar; most lassi is thinner than that.
         "sweet lassi",
-        kcal=95,
-        protein_g=3.1,
-        carbs_g=15.0,
-        fat_g=2.6,
+        kcal=80,
+        protein_g=2.9,
+        carbs_g=13.5,
+        fat_g=1.8,
         serving_g=250,
         aliases=("lassi", "mango lassi", "sweet curd drink"),
     ),
@@ -257,11 +259,14 @@ INDIAN: tuple[Fact, ...] = (
         note="As served, watered and tempered. Dry dal is roughly 340 kcal/100 g.",
     ),
     Fact(
+        # CoFID measures a homemade sambar at 49 and our own figure was 65. Both
+        # are internally consistent; they are different recipes, one barely
+        # tempered and one with a proper oil tadka. Settled between them.
         "sambar",
-        kcal=65,
+        kcal=58,
         protein_g=3.0,
-        carbs_g=9.0,
-        fat_g=1.8,
+        carbs_g=8.4,
+        fat_g=1.4,
         serving_g=150,
         aliases=("sambhar", "saaru"),
     ),
@@ -385,11 +390,13 @@ INDIAN: tuple[Fact, ...] = (
         aliases=("sabzi", "sabji", "veg curry", "vegetable curry", "kootu", "poriyal"),
     ),
     Fact(
+        # Whole-milk yogurt measures 79; ours at 60 assumed toned milk. Indian
+        # households use both, so the figure sits between them.
         "curd",
-        kcal=60,
-        protein_g=3.1,
-        carbs_g=4.7,
-        fat_g=3.3,
+        kcal=68,
+        protein_g=4.0,
+        carbs_g=5.5,
+        fat_g=3.4,
         serving_g=150,
         aliases=("yoghurt", "yogurt", "dahi", "plain curd", "thick curd"),
     ),
@@ -460,7 +467,9 @@ BASICS: tuple[Fact, ...] = (
          aliases=("badam", "almond")),
     Fact("cooked pasta", kcal=158, protein_g=5.8, carbs_g=31.0, fat_g=0.9, serving_g=140,
          aliases=("pasta", "spaghetti", "penne", "macaroni")),
-    Fact("cooked chickpeas", kcal=164, protein_g=8.9, carbs_g=27.0, fat_g=2.6, serving_g=160,
+    # USDA says 164 for boiled chickpeas, CoFID 129; the gap is how much water is
+    # drained off. Between the two.
+    Fact("cooked chickpeas", kcal=148, protein_g=8.6, carbs_g=23.0, fat_g=2.4, serving_g=160,
          aliases=("chana", "chole", "chickpeas", "garbanzo")),
     Fact("cooked rajma", kcal=127, protein_g=8.7, carbs_g=23.0, fat_g=0.5, serving_g=180,
          aliases=("rajma", "kidney beans")),

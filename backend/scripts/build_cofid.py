@@ -77,7 +77,7 @@ MISSING = {"n", "na", "n/a", ""}
 def parse_number(value: Any) -> float | None:
     if value is None:
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     text = str(value).strip().lower()
     if text in MISSING:
