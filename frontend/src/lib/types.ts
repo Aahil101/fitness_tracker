@@ -339,7 +339,7 @@ export interface FoodSearchItem {
   fat_per_100g: number | null;
   fiber_per_100g: number | null;
   serving_size_g: number | null;
-  source: 'cache' | 'usda';
+  source: 'curated' | 'cofid' | 'cache' | 'usda';
 }
 
 export interface RecognisedFood {

@@ -11,7 +11,7 @@ from ..db import SupabaseREST, build_params, eq
 from ..deps import UserContext, fetch_food_logs, get_context
 from ..errors import AppError
 from ..schemas import FoodLogCreate, FoodLogUpdate, FoodSearchItem
-from ..services import aggregate, usda
+from ..services import aggregate, cofid, food_facts, usda
 
 router = APIRouter(prefix="/api/food", tags=["food"])
 
@@ -51,9 +51,68 @@ async def search_food(
     limit: int = Query(default=20, ge=1, le=50),
     ctx: UserContext = Depends(get_context),
 ) -> list[FoodSearchItem]:
-    """Local cache first, then USDA FoodData Central."""
+    """Our own tables first, then the cache, then USDA.
+
+    Order matters more here than anywhere else in the app. Search is what a user
+    falls back to when AI logging is unavailable — and AI logging *is* regularly
+    unavailable, because the free Gemini tier allows twenty calls a day across all
+    users. Leaving this path on USDA alone meant the fallback was also the
+    inaccurate one: searching "chai" returned packet mixes, which is the failure
+    that started the whole rebuild.
+
+    The local tables cost nothing to consult and are the same figures the AI path
+    uses, so the two paths now agree.
+    """
     results: list[FoodSearchItem] = []
     seen_fdc: set[str] = set()
+    seen_names: set[str] = set()
+
+    def remember(name: str) -> bool:
+        """False when a food by this name has already been added."""
+        key = name.strip().lower()
+        if not key or key in seen_names:
+            return False
+        seen_names.add(key)
+        return True
+
+    # 1. The curated table: the foods people log most, with checked figures.
+    curated = food_facts.lookup(q)
+    if curated and remember(curated.name):
+        results.append(
+            FoodSearchItem(
+                fdc_id=None,
+                food_item_id=None,
+                name=curated.name,
+                brand=None,
+                calories_per_100g=curated.kcal,
+                protein_per_100g=curated.protein_g,
+                carbs_per_100g=curated.carbs_g,
+                fat_per_100g=curated.fat_g,
+                fiber_per_100g=None,
+                serving_size_g=curated.serving_g,
+                source="curated",
+            )
+        )
+
+    # 2. The bundled composition table.
+    for food in cofid.search(q, limit=min(limit, 8)):
+        if not remember(food.name):
+            continue
+        results.append(
+            FoodSearchItem(
+                fdc_id=None,
+                food_item_id=None,
+                name=food.name,
+                brand=None,
+                calories_per_100g=food.kcal,
+                protein_per_100g=food.protein_g,
+                carbs_per_100g=food.carbs_g,
+                fat_per_100g=food.fat_g,
+                fiber_per_100g=food.fibre_g,
+                serving_size_g=None,
+                source="cofid",
+            )
+        )
 
     cached_rows = await ctx.db.select(
         "food_items",
@@ -66,6 +125,8 @@ async def search_food(
     )
     for row in cached_rows:
         if row.get("calories_per_100g") is None:
+            continue
+        if not remember(str(row.get("name") or "")):
             continue
         if row.get("fdc_id"):
             seen_fdc.add(str(row["fdc_id"]))
@@ -85,10 +146,14 @@ async def search_food(
             )
         )
 
-    for item in await usda.search_foods(q, page_size=limit):
-        if item["fdc_id"] in seen_fdc:
-            continue
-        results.append(FoodSearchItem(**item, source="usda"))
+    # 4. USDA last, and only if the local sources left room. Skipping the call
+    #    entirely when they answered keeps search instant and offline for the
+    #    foods people actually search for.
+    if len(results) < limit:
+        for item in await usda.search_foods(q, page_size=limit):
+            if item["fdc_id"] in seen_fdc or not remember(item.get("name") or ""):
+                continue
+            results.append(FoodSearchItem(**item, source="usda"))
 
     return results[:limit]
 
