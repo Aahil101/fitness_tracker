@@ -303,3 +303,69 @@ def test_an_inferred_weight_says_so() -> None:
     assert burger is not None
     assert not burger.weight_inferred
     assert "not the weight" not in burger.provenance
+
+
+
+# --- through the endpoint ---------------------------------------------------
+
+
+PEPPY_PANEER_PARSE = {
+    "items": [
+        {
+            "food_name": "Domino's Peppy Paneer Pizza",
+            "usda_query": "paneer pizza",
+            # What the model actually guesses for this, and deliberately wrong:
+            # the published serving is what the chain sells, and the two must not
+            # be mixed.
+            "estimated_grams": 300,
+            "confidence": 0.6,
+            "quantity_text": "1",
+            "fallback_calories_per_100g": 260,
+            "item_calories": 780,
+        }
+    ],
+    "meal_type": "dinner",
+    "total_calories_estimate": 780,
+}
+
+
+def test_a_menu_item_is_served_with_the_published_portion_not_the_models_guess(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two numbers have to describe the same thing.
+
+    The response paired the model's 300 g with the published 857 kcal, which is
+    the chain's figure for a 311 g pizza. On its own that reads as a rounding
+    quirk; it is not, because the app lets the user edit the portion. Correcting
+    300 to a realistic weight rescaled a figure that was already exact.
+    """
+    from app.services import gemini, usda
+
+    async def fake_parse(text: str):
+        return PEPPY_PANEER_PARSE
+
+    async def no_usda(query: str):
+        return None
+
+    monkeypatch.setattr(gemini, "parse_meal_text", fake_parse)
+    monkeypatch.setattr(usda, "best_match", no_usda)
+
+    body = client.post(
+        "/api/ai/food-text", json={"text": "1 dominos peppy paneer pizza"}
+    ).json()
+
+    item = body["items"][0]
+    published = restaurant.lookup_known("dominos peppy paneer pizza", "Domino's")
+    assert published is not None
+
+    assert item["resolution"] == "brand"
+    # as_item() prefixes the chain, so the user sees whose figure this is.
+    assert item["matched_name"] == f"Domino's {published.name}"
+    assert item["calories"] == pytest.approx(published.kcal, abs=1.0)
+    assert item["portion_g"] == pytest.approx(published.serving_g, abs=1.0)
+    assert item["portion_g"] != 300, "the model's guess must not survive"
+    # And the pair is self-consistent, which is what the frontend relies on when
+    # the portion is edited.
+    assert item["calories"] / item["portion_g"] * 100 == pytest.approx(
+        published.kcal / (published.serving_g or 1) * 100, abs=1.0
+    )

@@ -338,7 +338,14 @@ async def _resolve_recognised_item(
 
     return RecognisedFood(
         food_name=display_name[:200],
-        portion_g=round(grams, 1),
+        # The portion comes from whatever priced the food, not from the model's
+        # guess at it. They are the same for every source that scales to the
+        # requested weight, and different for a menu item: a chain sells units, so
+        # the portion is the published serving. Reporting the model's 300 g beside
+        # a published 857 kcal left the two inconsistent, and the app lets the user
+        # edit that field — so correcting 300 to the real weight would have
+        # rescaled a figure that was already exact.
+        portion_g=round(decided.grams, 1),
         confidence=round(decided.confidence, 2),
         calories=decided.calories,
         protein_g=decided.protein_g,
