@@ -195,12 +195,22 @@ async def _resolve_recognised_item(
         grams=grams,
     )
 
+    branded_unpriced = decided is None and bool(
+        restaurant.detect_chain(f"{name} {query}") or restaurant.detect_chain(original_text)
+    )
+
     # -- 1. our own table. A hit here is final. --------------------------------
-    if decided is None:
+    #
+    # Skipped entirely for a named menu item we could not price. A generic food
+    # table asked about a McAloo Tikki answers "Burger, beef, grilled" — a beef
+    # burger for a potato patty, 37 g of protein against about 8 — and puts the
+    # chain's name on it. The model's own estimate is less precise and at least
+    # knows what the thing is.
+    if decided is None and not branded_unpriced:
         decided = resolve.from_curated(display_name, query, grams)
 
     # -- 2. a cached row, then USDA. Both are screened the same way. -----------
-    if decided is None:
+    if decided is None and not branded_unpriced:
         item: dict[str, Any] | None = None
         resolution = "unresolved"
         food_item_id: str | None = None
@@ -276,6 +286,13 @@ async def _resolve_recognised_item(
             matched_name=None,
             confidence=confidence,
         )
+
+    if decided is not None and branded_unpriced:
+        decided.notes.append(
+            "Estimated: we could not reach this chain's published figures, so this is "
+            "an approximation for a named menu item. Worth checking."
+        )
+        decided.confidence = min(decided.confidence, 0.4)
 
     if decided is None:
         return RecognisedFood(

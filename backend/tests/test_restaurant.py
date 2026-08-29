@@ -111,6 +111,32 @@ def test_checked_items_resolve_without_an_api_call() -> None:
     assert known.source
 
 
+KNOWN_ITEM_MATCHES = [
+    # Misspellings people actually type must still find the item.
+    ("dominos margarita pizza", True),
+    ("dominos margherita pizza", True),
+    ("dominos margarita", True),
+    # A different pizza must NOT inherit this one's figure. Accepting any overlap
+    # meant a Peppy Paneer matched Margherita on the shared word "pizza" and was
+    # reported as 688 kcal with the chain's name attached.
+    ("1 domonis peppy panner pizza", False),
+    ("dominos peppy paneer pizza", False),
+    ("dominos farmhouse pizza", False),
+    ("dominos cheese pizza", False),
+    ("dominos chicken dominator", False),
+]
+
+
+@pytest.mark.parametrize(("text", "should_match"), KNOWN_ITEM_MATCHES)
+def test_a_checked_figure_is_not_lent_to_a_different_menu_item(
+    text: str, should_match: bool
+) -> None:
+    found = restaurant.lookup_known(text, "Domino's") is not None
+    assert found is should_match, (
+        f"{text!r} {'should' if should_match else 'must not'} match the stored Margherita"
+    )
+
+
 def test_a_serving_converts_to_per_100g_without_losing_the_published_figure() -> None:
     """Menus publish per item; the rest of the pipeline works per 100 g.
 

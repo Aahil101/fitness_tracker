@@ -249,21 +249,52 @@ def detect_chain(text: str) -> str | None:
     return None
 
 
+#: Words that appear in half the menu and so distinguish nothing.
+_GENERIC_PRODUCT_WORDS = frozenset(
+    {
+        "pizza", "burger", "sandwich", "sub", "wrap", "roll", "meal", "combo",
+        "regular", "medium", "large", "small", "classic", "hand", "tossed",
+        "crust", "size", "veg", "non", "chicken", "cheese", "coffee", "shake",
+    }
+)
+
+#: How close a word has to be to count as the same product word. "margarita" and
+#: "margherita" score 0.84, "panner" and "paneer" 0.83 — both are how people
+#: actually spell these — while "peppy" against "margherita" is 0.13.
+PRODUCT_WORD_THRESHOLD = 0.8
+
+
 def lookup_known(text: str, chain: str) -> BrandedFood | None:
-    """A checked entry for this item, if there is one."""
-    tokens = set(_normalise(text).split())
+    """A checked entry for this item, if there is one.
+
+    Every distinguishing word of the stored product name has to be present, allowing
+    for misspelling. An earlier version accepted any overlap at all, which meant a
+    Peppy Paneer matched the Margherita entry on the shared word "pizza" and was
+    reported as 688 kcal with the chain's name on it. A confident wrong figure
+    under a brand is worse than no figure.
+    """
+    tokens = [w for w in _normalise(text).split() if len(w) > 2]
+    if not tokens:
+        return None
+
+    def present(word: str) -> bool:
+        return any(
+            token == word or SequenceMatcher(None, token, word).ratio() >= PRODUCT_WORD_THRESHOLD
+            for token in tokens
+        )
+
     best: tuple[int, BrandedFood] | None = None
     for item in KNOWN:
         if item.chain != chain:
             continue
-        # Match on the distinguishing words of the product name, ignoring the
-        # bracketed size note.
         product = _normalise(re.sub(r"\(.*?\)", "", item.name))
-        words = {w for w in product.split() if len(w) > 2}
-        overlap = len(words & tokens)
-        close_enough = overlap and overlap >= len(words) - 1
-        if close_enough and (best is None or overlap > best[0]):
-            best = (overlap, item)
+        distinctive = [
+            w for w in product.split() if len(w) > 2 and w not in _GENERIC_PRODUCT_WORDS
+        ]
+        if not distinctive or not all(present(word) for word in distinctive):
+            continue
+        if best is None or len(distinctive) > best[0]:
+            best = (len(distinctive), item)
     return best[1] if best else None
 
 
