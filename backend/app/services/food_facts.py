@@ -532,11 +532,31 @@ def lookup(query: str) -> Fact | None:
     if not query_tokens:
         return None
 
-    # 2. Every word of an alias is present in the query. Longest alias wins, so a
-    #    query naming milk and sugar beats the bare "tea" entry.
-    for _alias, alias_tokens, fact in _INDEX:
+    # First content word of the query, which for a food name is almost always the
+    # head noun: "chai with milk and sugar" is a chai, not a sugar.
+    head = next((_stem(w) for w in _normalise(query).split() if w in query_tokens), None)
+
+    # 2. Every word of an alias appears in the query. Several entries can qualify
+    #    at once, so they are scored rather than taken first-come.
+    #
+    #    Ordering by alias length looked reasonable and was badly wrong: for
+    #    "chai with milk and sugar" the aliases "chai", "milk" and "sugar" all
+    #    qualify, "sugar" sorted ahead of "chai", and a cup of tea was priced as
+    #    240 g of sugar — 929 kcal. Specificity first, then the head noun.
+    candidates: list[tuple[int, int, int, Fact]] = []
+    for alias, alias_tokens, fact in _INDEX:
         if alias_tokens and alias_tokens <= query_tokens:
-            return fact
+            candidates.append(
+                (
+                    len(alias_tokens),  # more of the query accounted for
+                    1 if head and head in alias_tokens else 0,  # is it the head noun
+                    len(alias),
+                    fact,
+                )
+            )
+    if candidates:
+        candidates.sort(key=lambda entry: (-entry[0], -entry[1], -entry[2]))
+        return candidates[0][3]
 
     # 3. Every word of the query is present in an alias — catches "chilla" for
     #    "jowar chilla" but never matches on a single shared filler word.

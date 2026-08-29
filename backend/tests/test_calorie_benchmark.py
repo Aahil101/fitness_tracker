@@ -191,3 +191,49 @@ def test_no_curated_alias_is_ambiguous() -> None:
                 f"alias {alias!r} is claimed by both {seen.get(key)!r} and {fact.name!r}"
             )
             seen[key] = fact.name
+
+
+
+# ---------------------------------------------------------------------------
+# Lookup precedence
+# ---------------------------------------------------------------------------
+HEAD_NOUN_CASES = [
+    # The regression: "chai with milk and sugar" matched the bare "sugar" alias
+    # and priced a cup of tea as 240 g of sugar — 929 kcal.
+    ("chai with milk and sugar", "tea with milk and sugar"),
+    ("pongal with ghee", "ven pongal"),
+    ("dosa with chutney", "dosa"),
+    ("rice with dal", "cooked white rice"),
+    ("paratha with butter", "paratha"),
+    ("idli with sambar", "idli"),
+    ("curd with sugar", "curd"),
+    # A bare ingredient must still resolve to itself.
+    ("sugar", "sugar"),
+    ("milk", "whole milk"),
+    ("ghee", "ghee"),
+]
+
+
+@pytest.mark.parametrize(("query", "expected"), HEAD_NOUN_CASES)
+def test_the_dish_wins_over_its_ingredients(query: str, expected: str) -> None:
+    """A name listing its ingredients must resolve to the dish, not an ingredient.
+
+    Several curated aliases can legitimately match one query: "chai with milk and
+    sugar" contains chai, milk and sugar, all three of which are entries. Picking
+    among them by alias length put sugar first and produced a 929 kcal cup of tea.
+    The first content word is the head noun and decides it.
+    """
+    fact = food_facts.lookup(query)
+    assert fact is not None, f"{query!r} should resolve"
+    assert fact.name == expected, (
+        f"{query!r} resolved to {fact.name!r}; the head noun says it should be {expected!r}"
+    )
+
+
+def test_a_dish_named_with_its_ingredients_is_priced_as_the_dish() -> None:
+    """The 929 kcal cup of tea, asserted in calories rather than in names."""
+    resolved = from_curated("chai with milk and sugar", "chai", 240)
+    assert resolved is not None
+    assert 60 <= resolved.calories <= 140, (
+        f"a 240 ml cup of chai came out at {resolved.calories:.0f} kcal"
+    )
