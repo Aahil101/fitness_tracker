@@ -68,6 +68,11 @@ BENCHMARK: list[tuple[str, float, float, float, str]] = [
     ("paneer curry", 180, 300, 380, ""),
     ("chicken biryani", 250, 400, 500, ""),
     ("mixed vegetable curry", 180, 145, 200, ""),
+    # Both of these were answered by a wrong curated neighbour before they had
+    # entries of their own: naan resolved to white bread, and baked beans to
+    # rajma, which is a different bean at nearly twice the energy.
+    ("naan", 90, 230, 290, "one naan"),
+    ("baked beans", 200, 140, 190, "a half tin"),
 ]
 
 
@@ -207,6 +212,8 @@ HEAD_NOUN_CASES = [
     ("paratha with butter", "paratha"),
     ("idli with sambar", "idli"),
     ("curd with sugar", "curd"),
+    ("naan bread", "naan"),
+    ("baked beans", "baked beans"),
     # A bare ingredient must still resolve to itself.
     ("sugar", "sugar"),
     ("milk", "whole milk"),
