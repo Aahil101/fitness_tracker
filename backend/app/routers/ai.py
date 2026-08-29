@@ -60,6 +60,16 @@ EXTENSION_BY_TYPE = {
 @router.get("/status")
 async def ai_status() -> dict[str, Any]:
     models = await gemini.list_models() if settings.gemini_configured else []
+
+    # Build the pools if nothing has used them yet. They are created lazily on
+    # the first call, so straight after a restart this endpoint reported an empty
+    # list — which reads as "no keys configured", the exact thing someone opens
+    # it to rule out. Building here is free and idempotent.
+    if settings.gemini_configured:
+        keypool.get_pool("gemini", settings.gemini_key_list)
+    if settings.groq_configured:
+        keypool.get_pool("groq", settings.groq_key_list)
+
     return {
         "gemini_configured": settings.gemini_configured,
         "model": settings.gemini_model,

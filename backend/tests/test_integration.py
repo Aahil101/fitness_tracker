@@ -335,7 +335,6 @@ def test_ai_status_reports_pool_health_without_serving_the_keys(
     gemini_pool = next(p for p in body["key_pools"] if p["provider"] == "gemini")
     assert gemini_pool["keys"] == 2
     assert gemini_pool["available"] == 1, "one benched, one ready"
-
     raw = response.text
     for secret in (secret_one, secret_two):
         assert secret not in raw
@@ -344,6 +343,32 @@ def test_ai_status_reports_pool_health_without_serving_the_keys(
 
 async def _no_models() -> list[str]:
     return []
+
+
+def test_ai_status_reports_the_pool_before_anything_has_used_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """Straight after a restart, the pool exists but has not been built.
+
+    Pools are created on first use, so this endpoint returned key_pools: [] until
+    someone logged a meal — which reads as "no keys configured", the first thing
+    you open it to rule out.
+    """
+    from app.config import settings
+    from app.services import gemini, keypool
+
+    monkeypatch.setattr(settings, "gemini_api_key", "one")
+    monkeypatch.setattr(settings, "gemini_api_keys", "two,three")
+    monkeypatch.setattr(settings, "groq_api_key", "groq-one")
+    monkeypatch.setattr(gemini, "list_models", lambda: _no_models())
+    assert keypool.all_status() == [], "nothing has used a key yet"
+
+    body = client.get("/api/ai/status").json()
+
+    pools = {p["provider"]: p for p in body["key_pools"]}
+    assert pools["gemini"]["keys"] == 3
+    assert pools["gemini"]["available"] == 3
+    assert pools["groq"]["keys"] == 1
 
 
 def test_photo_endpoint_explains_the_missing_key_instead_of_500ing(

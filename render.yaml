@@ -28,8 +28,19 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      # Additional keys, comma separated. The app fails over between them when
+      # one is exhausted or refused — see backend/app/services/keypool.py.
+      - key: GEMINI_API_KEYS
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_API_KEYS
+        sync: false
+      # 2.5-flash answers keys from older projects and 404s newer ones with "no
+      # longer available to new users", so a mixed pool needs a model all of the
+      # keys can reach.
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.5-flash
       - key: USDA_API_KEY
         sync: false
       - key: UPSTASH_REDIS_REST_URL
