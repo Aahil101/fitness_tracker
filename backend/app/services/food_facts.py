@@ -464,6 +464,23 @@ def _normalise(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+#: Ways of cooking or presenting a food, which the model likes to append as a
+#: parenthetical: "tea (brewed)", "sambar (stew)", "sugar (granulated)". These may
+#: be discarded when a name would otherwise not match anything.
+#:
+#: Deliberately an explicit list rather than "any word the table does not know".
+#: That looser rule matched "grilled fish" to grilled chicken breast, by throwing
+#: away the noun and keeping the modifier. Words like "plain", "black" and "green"
+#: are excluded because they distinguish real entries — plain tea is not chai.
+PREPARATION_WORDS = frozenset(
+    {
+        "brewed", "steeped", "infused", "cooked", "uncooked", "steamed", "boiled",
+        "fried", "pan", "panfried", "grilled", "roasted", "baked", "toasted",
+        "granulated", "powdered", "liquid", "melted", "stew", "gravy", "curry",
+        "dish", "preparation", "portion", "serving", "leftover", "reheated",
+    }
+)
+
 #: Words that carry no discriminating meaning in a food name.
 _FILLER = frozenset(
     {
@@ -566,7 +583,26 @@ def lookup(query: str) -> Fact | None:
             overlap = len(query_tokens)
             if best is None or overlap > best[0]:
                 best = (overlap, fact)
-    return best[1] if best else None
+    if best:
+        return best[1]
+
+    # 4. Retry with preparation words removed.
+    #
+    #    The model decorates names with how the food was made: "tea (brewed)",
+    #    "sambar (stew)", "sugar (granulated)". A single such word was enough to
+    #    defeat both passes above — "tea (brewed)" matched nothing at all and fell
+    #    through to a database that priced it as 1 kcal.
+    #
+    #    Only recognised preparation words are dropped, and only if something else
+    #    remains. Dropping every unfamiliar word instead matched "grilled fish" to
+    #    grilled chicken breast: it discarded the noun and kept the modifier.
+    trimmed = query_tokens - PREPARATION_WORDS
+    if trimmed and trimmed != query_tokens:
+        known = {word for _a, tokens, _f in _INDEX for word in tokens}
+        if trimmed <= known:
+            return lookup(" ".join(sorted(trimmed)))
+
+    return None
 
 
 def as_item(fact: Fact) -> dict[str, Any]:

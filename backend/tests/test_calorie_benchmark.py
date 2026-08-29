@@ -237,3 +237,63 @@ def test_a_dish_named_with_its_ingredients_is_priced_as_the_dish() -> None:
     assert 60 <= resolved.calories <= 140, (
         f"a 240 ml cup of chai came out at {resolved.calories:.0f} kcal"
     )
+
+
+
+# ---------------------------------------------------------------------------
+# Preparation words
+# ---------------------------------------------------------------------------
+PREPARATION_CASES = [
+    # The model appends how the food was made. One such word used to defeat the
+    # lookup entirely: "tea (brewed)" matched nothing and fell through to a
+    # database that priced it at 1 kcal.
+    ("tea (brewed)", "tea with milk and sugar"),
+    ("coffee (brewed)", "coffee with milk and sugar"),
+    ("sambar (stew)", "sambar"),
+    ("milk (liquid)", "whole milk"),
+    ("sugar (granulated)", "sugar"),
+    ("ghee (melted)", "ghee"),
+    ("pongal (cooked)", "ven pongal"),
+    ("jowar chilla (pan-fried)", "jowar chilla"),
+    ("idli (steamed)", "idli"),
+    ("dal (cooked)", "dal, cooked"),
+    # Qualifiers that distinguish real entries must survive. "plain tea" is not
+    # chai, and treating "plain" as noise would make it so.
+    ("tea (plain)", "black tea, unsweetened"),
+    ("plain tea", "black tea, unsweetened"),
+    ("green tea (brewed)", "black tea, unsweetened"),
+    ("black coffee (brewed)", "black coffee, unsweetened"),
+]
+
+
+@pytest.mark.parametrize(("query", "expected"), PREPARATION_CASES)
+def test_a_preparation_word_does_not_defeat_the_lookup(query: str, expected: str) -> None:
+    fact = food_facts.lookup(query)
+    assert fact is not None, f"{query!r} should still resolve with a preparation attached"
+    assert fact.name == expected
+
+
+# Foods genuinely absent from the table. Each shares a word with something in it,
+# which is what makes them the dangerous cases.
+NOT_IN_TABLE = [
+    "grilled fish",  # shares "grilled" with grilled chicken breast
+    "grilled salmon",
+    "grandmother's secret curry",  # shares "curry" with three entries
+    "unheard of dish",
+    "thalipeeth",
+    "pizza",
+    "sushi",
+]
+
+
+@pytest.mark.parametrize("query", NOT_IN_TABLE)
+def test_a_food_we_do_not_have_returns_nothing_rather_than_a_near_miss(query: str) -> None:
+    """Falling through to another source beats confidently answering wrongly.
+
+    An earlier version dropped every word it did not recognise and retried, which
+    threw away the noun and kept the modifier: "grilled fish" came back as grilled
+    chicken breast. A curated table earns its authority by refusing to guess.
+    """
+    assert food_facts.lookup(query) is None, (
+        f"{query!r} is not in the table and must not be answered by a near miss"
+    )

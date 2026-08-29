@@ -323,6 +323,32 @@ async def food_text(
     if any(i.resolution == "unresolved" for i in items):
         warnings.append("Some items could not be matched to nutrition data — check them before saving.")
 
+    # Check the parts against the whole. The model estimates the meal's energy
+    # independently of its own item list, which makes it the only figure able to
+    # notice that the breakdown dropped something — a described boiled egg that
+    # never became an item, for instance. Every per-item gate can pass while the
+    # list as a whole is still incomplete.
+    _, shortfall = resolve.reconcile_total(
+        [
+            resolve.Resolved(
+                name=i.food_name,
+                grams=i.portion_g,
+                calories=aggregate.num(i.calories, 0.0),
+                protein_g=aggregate.num(i.protein_g, 0.0),
+                carbs_g=aggregate.num(i.carbs_g, 0.0),
+                fat_g=aggregate.num(i.fat_g, 0.0),
+                fiber_g=i.fiber_g,
+                source=i.resolution,  # type: ignore[arg-type]
+                matched_name=i.matched_name,
+                confidence=i.confidence,
+            )
+            for i in items
+        ],
+        aggregate.num(parsed.get("total_calories_estimate"), 0.0),
+    )
+    if shortfall:
+        warnings.append(shortfall)
+
     meal_type = str(parsed.get("meal_type") or "").lower()
     if meal_type not in ("breakfast", "lunch", "dinner", "snack"):
         meal_type = None  # type: ignore[assignment]
