@@ -21,7 +21,7 @@ from ..schemas import (
     InsightRequest,
     RecognisedFood,
 )
-from ..services import aggregate, gemini, insights, resolve, text_ai, usda
+from ..services import aggregate, cofid, gemini, insights, resolve, text_ai, usda
 from ..services.forecast import forecast as run_forecast
 from .food import ensure_food_item
 
@@ -113,6 +113,16 @@ async def _resolve_recognised_item(
         if cached and usda.is_relevant(query, str(cached.get("name") or "")):
             item, resolution, food_item_id = cached, "cache", cached.get("id")
 
+        # The bundled composition table. Ahead of USDA because it is the right
+        # kind of source for what people describe: it lists foods as cooked and
+        # eaten, where FDC's searchable bulk is packets. No network call either,
+        # so this costs nothing and cannot fail.
+        if item is None:
+            local = cofid.best_match(query)
+            if local:
+                item, resolution = local.as_item(), "cofid"
+
+        # USDA last, for anything the table above does not carry.
         if item is None:
             match = await usda.best_match(query)
             if match:
@@ -198,6 +208,8 @@ async def _resolve_recognised_item(
 
 def _resolution_note(resolution: str) -> str | None:
     """Say where the numbers came from, but only when it changes what to do."""
+    if resolution == "cofid":
+        return None
     if resolution == "estimated":
         return (
             "Not in the USDA database, so these numbers are the model's estimate — "

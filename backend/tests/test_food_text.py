@@ -43,9 +43,10 @@ USDA_MATCHES = {
     "ghee": {"fdc_id": "3", "name": "Ghee", "calories_per_100g": 900.0},
     # What FDC actually returns for "idli": the packet, at dry-weight density.
     "idli": {"fdc_id": "4", "name": "Idli Mix", "calories_per_100g": 360.0},
-    # Deliberately outside the curated table, so the database and estimate paths
-    # are still reachable in tests. Anything the table answers never gets here.
-    "grilled fish": {"fdc_id": "5", "name": "Fish, grilled", "calories_per_100g": 180.0},
+    # Deliberately absent from BOTH the curated table and the bundled composition
+    # table, so the USDA and estimate paths are still reachable in tests. Anything
+    # either local source answers never reaches the network at all.
+    "injera": {"fdc_id": "5", "name": "Injera, teff flatbread", "calories_per_100g": 180.0},
     "thalipeeth": {"fdc_id": "6", "name": "Thalipeeth Mix", "calories_per_100g": 355.0},
 }
 
@@ -97,13 +98,13 @@ def test_typed_meal_becomes_items_with_nutrition(client, stub_ai):
 
 
 def test_search_phrases_rather_than_user_wording_reach_the_database(client, stub_ai):
-    """Only for foods the curated table does not answer — it never calls out."""
+    """Only for foods neither local table answers — those never call out at all."""
     seen = stub_ai(
         {
             "items": [
                 {
-                    "food_name": "grilled fish",
-                    "usda_query": "grilled fish",
+                    "food_name": "injera",
+                    "usda_query": "injera",
                     "estimated_grams": 150,
                     "confidence": 0.8,
                     "fallback_calories_per_100g": 170,
@@ -111,8 +112,28 @@ def test_search_phrases_rather_than_user_wording_reach_the_database(client, stub
             ]
         }
     )
-    client.post("/api/ai/food-text", json={"text": "a big piece of grilled fish"})
-    assert seen["queries"] == ["grilled fish"]
+    client.post("/api/ai/food-text", json={"text": "a big piece of injera"})
+    assert seen["queries"] == ["injera"]
+
+
+def test_a_locally_known_food_never_touches_the_network(client, stub_ai):
+    """The point of bundling a composition table: most foods resolve offline."""
+    seen = stub_ai(
+        {
+            "items": [
+                {
+                    "food_name": "raita",
+                    "usda_query": "raita",
+                    "estimated_grams": 100,
+                    "confidence": 0.8,
+                    "fallback_calories_per_100g": 60,
+                }
+            ]
+        }
+    )
+    item = client.post("/api/ai/food-text", json={"text": "a bowl of raita"}).json()["items"][0]
+    assert item["resolution"] in {"curated", "cofid"}
+    assert seen["queries"] == [], "a local hit must not reach USDA"
 
 
 def test_the_endpoint_only_drafts_and_never_writes_a_log(client, stub_ai, queries):
@@ -226,15 +247,15 @@ def test_dish_missing_from_usda_falls_back_to_an_estimate_not_a_dead_end(client,
 def test_usda_wins_when_its_numbers_are_plausible(client, stub_ai):
     """A database row beats an estimate — as long as it is the same food.
 
-    Uses grilled fish rather than tea: anything in the curated table is settled
-    before the database is consulted, so a curated food cannot test this.
+    Uses injera, which neither local table carries, because anything they do carry
+    is settled before USDA is consulted.
     """
     stub_ai(
         {
             "items": [
                 {
-                    "food_name": "grilled fish",
-                    "usda_query": "grilled fish",
+                    "food_name": "injera",
+                    "usda_query": "injera",
                     "estimated_grams": 100,
                     "confidence": 0.9,
                     # close to USDA's 180 kcal/100g, so the row is trusted
@@ -244,7 +265,7 @@ def test_usda_wins_when_its_numbers_are_plausible(client, stub_ai):
         }
     )
 
-    item = client.post("/api/ai/food-text", json={"text": "grilled fish"}).json()["items"][0]
+    item = client.post("/api/ai/food-text", json={"text": "injera"}).json()["items"][0]
     assert item["resolution"] == "usda"
     assert item["calories"] == pytest.approx(180.0, abs=0.5), "USDA's figure, not the estimate"
 
