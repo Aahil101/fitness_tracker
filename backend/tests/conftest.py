@@ -228,18 +228,21 @@ def _no_inherited_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]
 
     The key pool is reset too. It caches health per provider in a module global
     on purpose — a benched key must stay benched across requests — which between
-    tests means one test's exhausted keys change what the next one observes.
+    tests means one test's exhausted keys change what the next one observes. The
+    grounding circuit breaker is the same kind of state and is reset with it.
     """
     from app.config import settings
-    from app.services import keypool
+    from app.services import keypool, restaurant
 
     for field in _CREDENTIAL_FIELDS:
         assert hasattr(settings, field), f"{field} no longer exists on Settings"
         monkeypatch.setattr(settings, field, "")
 
     keypool._POOLS.clear()
+    restaurant.reset_grounding_backoff()
     yield
     keypool._POOLS.clear()
+    restaurant.reset_grounding_backoff()
 
 
 @pytest.fixture(autouse=True)

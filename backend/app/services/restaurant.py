@@ -30,12 +30,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any
 
 from ..config import settings
-from ..errors import UpstreamError
 from ..http import get_http_client
 from . import keypool
 from .keypool import get_pool
@@ -365,6 +365,40 @@ def _number(value: Any, default: float = 0.0) -> float:
         return default
 
 
+#: Search grounding is not part of Gemini's free tier. Every key answers a
+#: grounded request with 429 RESOURCE_EXHAUSTED immediately — while the same keys
+#: answer ordinary generateContent perfectly — so this is a missing capability,
+#: not an allowance being consumed. Adding keys cannot fix it; only billing on the
+#: project can. Until then, attempting it costs one wasted call per key and about
+#: 1.5s of latency on every branded item, so a refusal from the whole pool turns
+#: it off for a while rather than being rediscovered on the next pizza.
+GROUNDING_BACKOFF_S = 6 * 60 * 60
+
+_grounding_unavailable_until = 0.0
+
+
+def grounding_available() -> bool:
+    return time.monotonic() >= _grounding_unavailable_until
+
+
+def _disable_grounding(reason: str) -> None:
+    global _grounding_unavailable_until
+    _grounding_unavailable_until = time.monotonic() + GROUNDING_BACKOFF_S
+    log.warning(
+        "Search grounding refused by every key (%s); not attempting it for %.0f h. "
+        "Branded items will use the checked menu table or an estimate. Enabling "
+        "billing on one Gemini project restores it.",
+        reason,
+        GROUNDING_BACKOFF_S / 3600,
+    )
+
+
+def reset_grounding_backoff() -> None:
+    """For tests, and for anyone who has just enabled billing and wants it back."""
+    global _grounding_unavailable_until
+    _grounding_unavailable_until = 0.0
+
+
 async def lookup_published(description: str, chain: str) -> BrandedFood | None:
     """Ask Gemini, with Google Search, what the chain publishes for this item.
 
@@ -372,7 +406,7 @@ async def lookup_published(description: str, chain: str) -> BrandedFood | None:
     for a named product is worse than falling back to a generic food, because the
     brand name makes it look authoritative.
     """
-    if not settings.gemini_configured:
+    if not settings.gemini_configured or not grounding_available():
         return None
 
     body = {
@@ -389,13 +423,21 @@ async def lookup_published(description: str, chain: str) -> BrandedFood | None:
     }
 
     # Grounded lookups are the most quota-hungry call the app makes, so they walk
-    # the whole pool before giving up — and they share the pool with every other
-    # Gemini call, so a key benched here is not retried by the coach a second
-    # later, and one benched there is skipped here.
+    # the whole pool before giving up.
+    #
+    # They deliberately do not bench a key. A grounded refusal says nothing about
+    # whether that key can still answer ordinary calls, and treating it as if it
+    # did poisoned the pool: one Domino's lookup benched all five keys for an
+    # hour, so /api/ai/status reported nothing available while every key was in
+    # fact answering the coach and the meal parser normally. If a key really is
+    # out of its daily allowance, the next plain call will find that out and bench
+    # it for the right reason.
     pool = get_pool("gemini", settings.gemini_key_list)
     client = get_http_client()
     response = None
-    for key in pool.healthy():
+    refusals = 0
+    keys = pool.healthy()
+    for key in keys:
         try:
             attempt = await client.post(
                 f"{GEMINI_URL}/{GEMINI_MODEL}:generateContent",
@@ -409,10 +451,8 @@ async def lookup_published(description: str, chain: str) -> BrandedFood | None:
             )
         except Exception as exc:  # network, timeout
             log.info("Grounded brand lookup failed for %r: %s", description, exc)
-            pool.bench(key, "unreachable", keypool.TRANSIENT_COOLDOWN_S)
             continue
         if attempt.status_code < 400:
-            pool.note_success(key)
             response = attempt
             break
         verdict = keypool.classify(attempt.status_code, attempt.text[:200])
@@ -426,10 +466,14 @@ async def lookup_published(description: str, chain: str) -> BrandedFood | None:
             # Same request, same refusal on every key — spending the pool on it
             # only delays the fallback to a generic food.
             break
-        pool.bench(key, verdict[0], verdict[1])
+        refusals += 1
 
     if response is None:
-        raise UpstreamError("Nutrition lookup limit reached for today. Try again tomorrow.")
+        if keys and refusals == len(keys):
+            _disable_grounding(f"{refusals} of {refusals} keys")
+        # Not an error the user can act on: the caller has a checked menu table
+        # and an estimate to fall back to, and both are better than a dead entry.
+        return None
 
     payload = response.json()
     candidate = (payload.get("candidates") or [{}])[0]

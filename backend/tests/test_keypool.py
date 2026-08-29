@@ -413,39 +413,81 @@ async def test_a_brand_lookup_never_puts_the_key_in_the_url(
     assert seen[0].headers["x-goog-api-key"] == "secret-brand-key"
 
 
-async def test_a_brand_lookup_shares_the_bench_with_every_other_gemini_call(
+async def test_a_grounded_refusal_does_not_bench_a_key_for_ordinary_calls(
     five_keys,
 ) -> None:
-    """One pool, not two.
+    """Search grounding is not part of Gemini's free tier at all.
 
-    A grounded lookup is the most quota-hungry call the app makes. When it kept
-    its own list of keys, a key it had just found to be dry was tried again by
-    the coach a second later, and a key the coach had spent was tried again here
-    — so the wasted 429 was paid twice for every exhausted key.
+    Every key answers a grounded request with 429 RESOURCE_EXHAUSTED in about
+    120ms while answering plain generateContent perfectly — verified against the
+    live API on all five. So a grounded 429 says nothing about whether that key
+    can still serve the coach, and treating it as if it did poisoned the pool:
+    one Domino's lookup benched all five keys for an hour, and /api/ai/status
+    then reported nothing available while every key was in fact working.
     """
     from app.services import restaurant
 
     five_keys(lambda _: httpx.Response(429, json=QUOTA))
 
-    with pytest.raises(UpstreamError):
-        await restaurant.lookup_published("dominos farmhouse", "Domino's")
+    assert await restaurant.lookup_published("dominos farmhouse", "Domino's") is None
 
     pool = keypool.get_pool("gemini", settings.gemini_key_list)
-    assert pool.available == 0, "the lookup benched the keys it found exhausted"
-
-    with pytest.raises(UpstreamError):
-        await gemini.recognise_food(b"\xff\xd8\xff jpeg")
+    assert pool.available == 5, "the keys are fine for everything except grounding"
 
 
-async def test_a_brand_lookup_that_is_refused_outright_stops_asking(five_keys) -> None:
-    """A rejected request is not a key problem, so it does not cost five keys."""
+async def test_grounding_refused_by_the_whole_pool_stops_being_attempted(
+    five_keys,
+) -> None:
+    """Otherwise every branded item costs five wasted calls and about 1.5s.
+
+    Rediscovering a missing capability on each pizza is pure latency: the answer
+    will not change until someone enables billing.
+    """
+    from app.services import restaurant
+
+    tried = five_keys(lambda _: httpx.Response(429, json=QUOTA))
+
+    assert await restaurant.lookup_published("dominos farmhouse", "Domino's") is None
+    assert len(tried) == 5
+    assert not restaurant.grounding_available()
+
+    tried.clear()
+    assert await restaurant.lookup_published("dominos peppy paneer", "Domino's") is None
+    assert tried == [], "no further calls while grounding is known to be unavailable"
+
+    restaurant.reset_grounding_backoff()
+    assert await restaurant.lookup_published("dominos farmhouse", "Domino's") is None
+    assert len(tried) == 5, "and it can be turned back on, for when billing is enabled"
+
+
+async def test_one_bad_request_does_not_disable_grounding(five_keys) -> None:
+    """A refused request is about the request, not about the capability.
+
+    It stops after one key, because the other four would refuse it identically —
+    but it must not conclude that grounding is gone, or a single malformed
+    description would turn the feature off for six hours.
+    """
     from app.services import restaurant
 
     tried = five_keys(
         lambda _: httpx.Response(400, json={"error": {"message": "Invalid argument."}})
     )
 
-    with pytest.raises(UpstreamError):
-        await restaurant.lookup_published("dominos farmhouse", "Domino's")
-
+    assert await restaurant.lookup_published("dominos farmhouse", "Domino's") is None
     assert len(tried) == 1
+    assert restaurant.grounding_available(), "one bad request is not a missing feature"
+
+
+async def test_a_failed_brand_lookup_returns_none_rather_than_raising(five_keys) -> None:
+    """The caller has better fallbacks than an error message.
+
+    _resolve_branded has a checked menu table and a model estimate to fall back
+    to, and an approximate pizza beats a failed meal log. This used to raise
+    "Nutrition lookup limit reached for today", which the caller caught and
+    logged — so the behaviour was already this, by accident, through an exception
+    path that also read as if the user had done something wrong.
+    """
+    from app.services import restaurant
+
+    five_keys(lambda _: httpx.Response(429, json=QUOTA))
+    assert await restaurant.lookup_published("dominos farmhouse", "Domino's") is None
