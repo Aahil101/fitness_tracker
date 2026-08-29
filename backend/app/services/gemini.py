@@ -450,6 +450,12 @@ forget the milk. Either of those loses almost all of the energy.
 Sanity-check yourself before answering: milk, sugar, ghee, butter, oil, cream,
 cheese, nuts and coconut all carry real energy. If your entry mentions one and
 comes out near zero, you have made this mistake.
+
+Get the proportions right when you break a drink into components. Tea or coffee
+made with milk the Indian way is boiled with roughly a third milk, not a splash:
+for a 240 g cup, about 80 g of milk, 5-8 g of sugar, the rest tea. A cup like that
+is 80-100 kcal in total. Thirty grams of milk is what goes in a mug of English
+tea, and using it for chai loses half the energy in the cup.
 * estimated_grams is the total for that entry, counting every unit of it.
 * quantity_text echoes the user's own wording for that item, so they can see how
   their phrasing was read.
