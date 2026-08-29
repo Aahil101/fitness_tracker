@@ -539,14 +539,45 @@ def _tokens(text: str) -> frozenset[str]:
 
 # Alias -> Fact, built once. Longer aliases are matched first so that
 # "tea with milk and sugar" cannot be captured by the bare alias "tea".
-_INDEX: list[tuple[str, frozenset[str], Fact]] = sorted(
+def _head_token(text: str) -> str | None:
+    """First content word — the head noun of a food name."""
+    tokens = _tokens(text)
+    return next((_stem(w) for w in _normalise(text).split() if _stem(w) in tokens), None)
+
+
+#: (normalised alias, alias tokens, alias head token, fact).
+_INDEX: list[tuple[str, frozenset[str], str | None, Fact]] = sorted(
     (
-        (_normalise(alias), _tokens(alias), fact)
+        (_normalise(alias), _tokens(alias), _head_token(alias), fact)
         for fact in ALL_FACTS
         for alias in (fact.name, *fact.aliases)
     ),
     key=lambda entry: -len(entry[0]),
 )
+
+
+#: A parenthetical opening with one of these is saying where an ingredient went,
+#: not what it is: "sugar (added to tea)", "milk (in coffee)", "ghee (added to
+#: pongal)". Those words have to be discarded, or the ingredient gets priced as
+#: the dish — a spoon of sugar came out as 1.5 kcal because "tea with sugar"
+#: outranked "sugar", and ghee in pongal came out as a serving of pongal.
+#:
+#: Deliberately not "with", which is load-bearing: "Tea (with milk and sugar)"
+#: describes the drink, and dropping it is what caused the original 1 kcal chai.
+_PLACEMENT = re.compile(r"^\s*(in|added|for|used|to|on|into|alongside)\b", re.IGNORECASE)
+_PARENTHETICAL = re.compile(r"^(?P<stem>[^(]+)\((?P<inside>[^)]*)\)\s*$")
+
+
+def _strip_placement(query: str) -> str | None:
+    """The food on its own, when the brackets only say where it ended up."""
+    match = _PARENTHETICAL.match(query.strip())
+    if not match:
+        return None
+    inside = match.group("inside")
+    if not _PLACEMENT.match(inside):
+        return None
+    stem = match.group("stem").strip()
+    return stem or None
 
 
 def lookup(query: str) -> Fact | None:
@@ -556,12 +587,21 @@ def lookup(query: str) -> Fact | None:
     because a wrong curated answer is worse than falling through to USDA. Three
     passes, in descending strictness.
     """
+    # "sugar (added to tea)" is sugar. Resolve the food by itself before letting
+    # the surrounding context influence the match.
+    bare = _strip_placement(query)
+    if bare:
+        direct = lookup(bare)
+        if direct is not None:
+            return direct
+
     normalised = _normalise(query)
     if not normalised:
         return None
 
     # 1. Exact alias.
-    for alias, _, fact in _INDEX:
+    for entry in _INDEX:
+        alias, fact = entry[0], entry[3]
         if alias == normalised:
             return fact
 
@@ -579,14 +619,20 @@ def lookup(query: str) -> Fact | None:
     #    Ordering by alias length looked reasonable and was badly wrong: for
     #    "chai with milk and sugar" the aliases "chai", "milk" and "sugar" all
     #    qualify, "sugar" sorted ahead of "chai", and a cup of tea was priced as
-    #    240 g of sugar — 929 kcal. Specificity first, then the head noun.
+    #    240 g of sugar — 929 kcal.
+    #
+    #    Ranking by specificity first was also wrong, more subtly. For "sugar
+    #    (added to tea)" both "sugar" and the alias "tea with sugar" qualify, and
+    #    the longer one won, so a spoonful of sugar was priced as a cup of tea —
+    #    1.5 kcal instead of 15.5. What settles it is whether the alias is *about*
+    #    the same thing: its own head noun has to be the query's head noun.
     candidates: list[tuple[int, int, int, Fact]] = []
-    for alias, alias_tokens, fact in _INDEX:
+    for alias, alias_tokens, alias_head, fact in _INDEX:
         if alias_tokens and alias_tokens <= query_tokens:
             candidates.append(
                 (
-                    len(alias_tokens),  # more of the query accounted for
-                    1 if head and head in alias_tokens else 0,  # is it the head noun
+                    1 if head and alias_head == head else 0,  # same subject
+                    len(alias_tokens),  # then: more of the query accounted for
                     len(alias),
                     fact,
                 )
@@ -598,7 +644,7 @@ def lookup(query: str) -> Fact | None:
     # 3. Every word of the query is present in an alias — catches "chilla" for
     #    "jowar chilla" but never matches on a single shared filler word.
     best: tuple[int, Fact] | None = None
-    for _alias, alias_tokens, fact in _INDEX:
+    for _alias, alias_tokens, _alias_head, fact in _INDEX:
         if alias_tokens and query_tokens <= alias_tokens:
             overlap = len(query_tokens)
             if best is None or overlap > best[0]:
@@ -618,7 +664,7 @@ def lookup(query: str) -> Fact | None:
     #    grilled chicken breast: it discarded the noun and kept the modifier.
     trimmed = query_tokens - PREPARATION_WORDS
     if trimmed and trimmed != query_tokens:
-        known = {word for _a, tokens, _f in _INDEX for word in tokens}
+        known = {word for _a, tokens, _h, _f in _INDEX for word in tokens}
         if trimmed <= known:
             return lookup(" ".join(sorted(trimmed)))
 

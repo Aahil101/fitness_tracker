@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import date, timedelta
 from typing import Any
@@ -21,7 +22,7 @@ from ..schemas import (
     InsightRequest,
     RecognisedFood,
 )
-from ..services import aggregate, cofid, gemini, insights, resolve, text_ai, usda
+from ..services import aggregate, cofid, gemini, insights, resolve, restaurant, text_ai, usda
 from ..services.forecast import forecast as run_forecast
 from .food import ensure_food_item
 
@@ -59,6 +60,78 @@ async def ai_status() -> dict[str, Any]:
     }
 
 
+async def _resolve_branded(
+    ctx: UserContext, *, description: str, grams: float
+) -> resolve.Resolved | None:
+    """A named chain item, priced from what the chain publishes.
+
+    Cached in ``food_items`` because a grounded lookup costs one of the twenty
+    Gemini requests the free tier allows per day, shared with ordinary meal
+    parsing. Uncached, a few pizzas would exhaust the day.
+    """
+    chain = restaurant.detect_chain(description)
+    if not chain:
+        return None
+
+    def build(item: dict[str, Any], confidence: float, note: str) -> resolve.Resolved:
+        # Menus publish per item. Where the portion the model guessed is close to
+        # the published serving, use the serving, so the number the user sees is
+        # the number on the menu rather than that scaled by a guess.
+        serving = aggregate.num(item.get("serving_g"), 0.0)
+        portion = serving if serving > 0 and abs(grams - serving) / serving < 0.5 else grams
+        scaled = usda.scale_to_portion(item, portion)
+        return resolve.Resolved(
+            name=display_or(item),
+            grams=round(portion, 1),
+            calories=aggregate.num(scaled.get("calories"), 0.0),
+            protein_g=aggregate.num(scaled.get("protein_g"), 0.0),
+            carbs_g=aggregate.num(scaled.get("carbs_g"), 0.0),
+            fat_g=aggregate.num(scaled.get("fat_g"), 0.0),
+            fiber_g=scaled.get("fiber_g"),
+            source="brand",
+            matched_name=item.get("name"),
+            confidence=confidence,
+            notes=[note] if note else [],
+        )
+
+    def display_or(item: dict[str, Any]) -> str:
+        return str(item.get("name") or description)[:200]
+
+    # Checked figures.
+    known = restaurant.lookup_known(description, chain)
+    if known:
+        return build(known.as_item(), known.confidence, known.source)
+
+    # Previously looked up, by anyone.
+    cached = await ctx.db.select_one(
+        "food_items",
+        {
+            "select": "*",
+            "name": f"ilike.{chain}%",
+            "calories_per_100g": "not.is.null",
+            "order": "created_at.desc",
+        },
+    )
+    if cached and restaurant.detect_chain(str(cached.get("name") or "")) == chain:
+        tokens = {w for w in re.findall(r"[a-z]+", description.lower()) if len(w) > 2}
+        cached_tokens = {w for w in re.findall(r"[a-z]+", str(cached.get("name") or "").lower())}
+        # Only reuse a cached row that is the same menu item, not merely the same
+        # chain — otherwise every Domino's order would be priced as the last one.
+        if tokens and len(tokens & cached_tokens) >= max(1, len(tokens) - 2):
+            return build(cached, 0.8, f"{chain} published figures (cached)")
+
+    published = await restaurant.lookup_published(description, chain)
+    if published is None:
+        return None
+
+    item = published.as_item()
+    try:
+        await ensure_food_item(ctx.db, {**item, "fdc_id": None})
+    except Exception:  # caching is best effort
+        log.info("Could not cache branded lookup for %r", description)
+    return build(item, published.confidence, published.source)
+
+
 async def _resolve_recognised_item(
     ctx: UserContext, raw: dict[str, Any]
 ) -> RecognisedFood:
@@ -92,8 +165,16 @@ async def _resolve_recognised_item(
 
     model_per_100g = aggregate.num(raw.get("fallback_calories_per_100g"), 0.0)
 
+    # -- 0. named restaurant items. -------------------------------------------
+    # A chain's own published figure is the truth for its own product, and no
+    # composition table can reproduce it: a generic pizza entry and a Domino's
+    # Peppy Paneer differ by hundreds of calories. Checked figures first, then a
+    # cached lookup, then a grounded search — see services/restaurant.py.
+    decided = await _resolve_branded(ctx, description=f"{name} {query}", grams=grams)
+
     # -- 1. our own table. A hit here is final. --------------------------------
-    decided = resolve.from_curated(display_name, query, grams)
+    if decided is None:
+        decided = resolve.from_curated(display_name, query, grams)
 
     # -- 2. a cached row, then USDA. Both are screened the same way. -----------
     if decided is None:
@@ -208,6 +289,11 @@ async def _resolve_recognised_item(
 
 def _resolution_note(resolution: str) -> str | None:
     """Say where the numbers came from, but only when it changes what to do."""
+    if resolution == "brand":
+        # The chain's own published figure. Worth saying so: it is more
+        # authoritative than anything we could compute, and it is also only as
+        # good as the menu, which the user may want to know.
+        return None
     if resolution == "cofid":
         return None
     if resolution == "estimated":

@@ -42,7 +42,7 @@ from . import food_facts
 
 log = logging.getLogger(__name__)
 
-Source = Literal["curated", "cofid", "usda", "cache", "estimated", "unresolved"]
+Source = Literal["brand", "curated", "cofid", "usda", "cache", "estimated", "unresolved"]
 
 #: A database row has to agree with the model's own density within this factor to
 #: be trusted. Wider than it looks: cooked-vs-dry errors are threefold.
