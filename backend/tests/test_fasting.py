@@ -353,8 +353,6 @@ class TestFastingEndpoints:
 
     def test_a_backdated_start_is_accepted(self, client):
         """The common case: last ate at 8pm, opened the app in the morning."""
-        from datetime import UTC, datetime, timedelta
-
         earlier = (datetime.now(UTC) - timedelta(hours=11)).isoformat()
         body = client.post(
             "/api/fasting/start", json={"target_hours": 16, "started_at": earlier}
@@ -363,8 +361,6 @@ class TestFastingEndpoints:
 
     def test_a_start_in_the_future_is_clamped_to_now(self, client):
         """Otherwise elapsed time would be negative and the ring would run backwards."""
-        from datetime import UTC, datetime, timedelta
-
         later = (datetime.now(UTC) + timedelta(hours=5)).isoformat()
         body = client.post(
             "/api/fasting/start", json={"target_hours": 16, "started_at": later}
@@ -372,8 +368,6 @@ class TestFastingEndpoints:
         assert body["state"]["elapsed_hours"] == pytest.approx(0.0, abs=0.05)
 
     def test_a_start_more_than_a_week_ago_is_rejected(self, client):
-        from datetime import UTC, datetime, timedelta
-
         ancient = (datetime.now(UTC) - timedelta(days=30)).isoformat()
         response = client.post(
             "/api/fasting/start", json={"target_hours": 16, "started_at": ancient}
@@ -409,6 +403,62 @@ class TestFastingEndpoints:
         assert body["hours"] > 0
         assert "met_target" in body
         assert body["state"]["active"] is False
+
+    def test_a_finished_fast_can_be_recorded_after_the_fact(self, client):
+        """Backs the undo-after-delete affordance, and logging an untimed fast."""
+        now = datetime.now(UTC)
+        body = client.post(
+            "/api/fasting/log",
+            json={
+                "started_at": (now - timedelta(hours=18)).isoformat(),
+                "ended_at": (now - timedelta(hours=2)).isoformat(),
+                "target_hours": 16,
+            },
+        ).json()
+        assert body["hours"] == pytest.approx(16.0, abs=0.05)
+        assert body["session"]["ended_at"], "must be written closed, not open"
+
+    def test_a_logged_fast_cannot_end_before_it_starts(self, client):
+        now = datetime.now(UTC)
+        response = client.post(
+            "/api/fasting/log",
+            json={
+                "started_at": (now - timedelta(hours=2)).isoformat(),
+                "ended_at": (now - timedelta(hours=18)).isoformat(),
+            },
+        )
+        assert response.status_code == 400
+
+    def test_a_logged_fast_cannot_be_in_the_future(self, client):
+        now = datetime.now(UTC)
+        response = client.post(
+            "/api/fasting/log",
+            json={
+                "started_at": (now + timedelta(hours=1)).isoformat(),
+                "ended_at": (now + timedelta(hours=17)).isoformat(),
+            },
+        )
+        assert response.status_code == 400
+
+    def test_logging_a_finished_fast_does_not_collide_with_a_running_one(
+        self, client, monkeypatch
+    ):
+        """The whole point of a separate endpoint: undo must work mid-fast."""
+        from app.routers import fasting as router_module
+
+        async def already_open(ctx):
+            return session(started_hours_ago=3.0)
+
+        monkeypatch.setattr(router_module, "_open_session", already_open)
+        now = datetime.now(UTC)
+        response = client.post(
+            "/api/fasting/log",
+            json={
+                "started_at": (now - timedelta(days=2)).isoformat(),
+                "ended_at": (now - timedelta(days=2) + timedelta(hours=16)).isoformat(),
+            },
+        )
+        assert response.status_code == 201
 
     def test_history_returns_sessions_and_a_summary(self, client):
         body = client.get("/api/fasting/history").json()

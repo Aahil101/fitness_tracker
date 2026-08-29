@@ -1,4 +1,4 @@
-import { Clock, Flame, History, Play, Square, Timer } from 'lucide-react';
+import { Clock, Flame, History, Play, Square, Timer, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { FastingRing } from '@/components/FastingRing';
@@ -14,9 +14,16 @@ import {
   TextField,
   useToast,
 } from '@/components/md';
-import { useFasting, useFastingHistory, useStartFast, useStopFast } from '@/hooks/queries';
+import {
+  useDeleteFast,
+  useFasting,
+  useFastingHistory,
+  useRestoreFast,
+  useStartFast,
+  useStopFast,
+} from '@/hooks/queries';
 import { cn } from '@/lib/cn';
-import { hoursLabel } from '@/lib/format';
+import { hmsLabel, hoursLabel } from '@/lib/format';
 import type { FastingStageKey } from '@/lib/types';
 
 /** The schedules people actually follow, named the way they name them. */
@@ -44,6 +51,8 @@ export function Fasting() {
   const history = useFastingHistory();
   const startFast = useStartFast();
   const stopFast = useStopFast();
+  const deleteFast = useDeleteFast();
+  const restoreFast = useRestoreFast();
   const toast = useToast();
 
   const [target, setTarget] = useState(16);
@@ -159,8 +168,8 @@ export function Fasting() {
           >
             {live.active ? (
               <>
-                <span className="tabular text-display-md font-medium leading-none tracking-tight">
-                  {hoursLabel(live.elapsed_hours)}
+                <span className="tabular text-headline-lg font-medium leading-none tracking-tight">
+                  {hmsLabel(live.elapsed_hours)}
                 </span>
                 <span className="mt-1.5 text-label-sm text-md-on-surface-variant">
                   of {hoursLabel(live.target_hours)}
@@ -187,6 +196,10 @@ export function Fasting() {
               </>
             )}
           </FastingRing>
+
+          <p className="mt-3 text-center text-label-sm text-md-on-surface-variant/80">
+            Tap or hover a section of the ring for that cycle&apos;s timings.
+          </p>
 
           {live.active && currentStage && (
             <div className="mt-5 text-center">
@@ -359,7 +372,35 @@ export function Fasting() {
                           · target {session.target_hours}h
                         </p>
                       </div>
-                      <Badge tone={met ? 'success' : 'neutral'}>{met ? 'Target met' : 'Short'}</Badge>
+                      <div className="flex items-center gap-1.5">
+                        <Badge tone={met ? 'success' : 'neutral'}>
+                          {met ? 'Target met' : 'Short'}
+                        </Badge>
+                        {/* Always visible, never hover-only: on a touchscreen a
+                            hover-revealed control does not exist. */}
+                        <button
+                          type="button"
+                          aria-label={`Delete the ${hoursLabel(hours)} fast from ${new Date(
+                            session.started_at,
+                          ).toLocaleDateString()}`}
+                          onClick={() => {
+                            deleteFast.mutate(session.id, {
+                              onSuccess: (result) =>
+                                toast.show(`${hoursLabel(hours)} fast removed.`, 'success', {
+                                  label: 'Undo',
+                                  onClick: () => restoreFast.mutate(result.deleted),
+                                }),
+                              onError: (caught) =>
+                                toast.error(
+                                  caught instanceof Error ? caught.message : 'Delete failed.',
+                                ),
+                            });
+                          }}
+                          className="shrink-0 rounded-full p-2 text-md-on-surface-variant/70 transition-all duration-short hover:bg-md-error/10 hover:text-md-error focus-visible:text-md-error"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     </li>
                   );
                 })}

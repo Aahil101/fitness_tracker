@@ -15,6 +15,7 @@ import { api } from '@/lib/api';
 import type {
   AnalyticsResponse,
   DashboardResponse,
+  FastingSession,
   FoodLog,
   ForecastWindow,
   InsightKind,
@@ -147,6 +148,26 @@ export function useStopFast() {
 export function useDeleteFast() {
   const invalidate = useInvalidateFasting();
   return useMutation({ mutationFn: api.deleteFast, onSuccess: invalidate });
+}
+
+/**
+ * Puts a deleted fast back, for the Undo on the toast.
+ *
+ * Writes a closed row through /log rather than /start, so undoing works even if
+ * a new fast happens to be running — /start would be refused.
+ */
+export function useRestoreFast() {
+  const invalidate = useInvalidateFasting();
+  return useMutation({
+    mutationFn: (row: FastingSession) =>
+      api.logFast({
+        started_at: row.started_at,
+        ended_at: row.ended_at ?? row.started_at,
+        target_hours: row.target_hours,
+        note: row.note ?? undefined,
+      }),
+    onSuccess: invalidate,
+  });
 }
 
 export function useWeights(days = 90) {

@@ -259,6 +259,17 @@ export const api = {
       state: FastingState;
     }>('/api/fasting/stop', { method: 'POST', body }),
 
+  logFast: (body: {
+    started_at: string;
+    ended_at: string;
+    target_hours?: number;
+    note?: string;
+  }) =>
+    request<{ session: FastingSession; hours: number }>('/api/fasting/log', {
+      method: 'POST',
+      body,
+    }),
+
   fastingHistory: (days = 90) =>
     request<FastingHistory>('/api/fasting/history', { query: { days } }),
 

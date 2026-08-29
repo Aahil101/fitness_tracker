@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from ..db import eq
 from ..deps import UserContext, fetch_food_logs, fetch_workouts, get_context
 from ..errors import AppError
-from ..schemas import FastingStartRequest, FastingStopRequest
+from ..schemas import FastingLogRequest, FastingStartRequest, FastingStopRequest
 from ..services import aggregate, fasting
 
 router = APIRouter(prefix="/api/fasting", tags=["fasting"])
@@ -163,6 +163,42 @@ async def stop(
         "met_target": hours >= float(saved.get("target_hours") or 0),
         "state": await _state(ctx, None),
     }
+
+
+@router.post("/log", status_code=201)
+async def log_completed(
+    payload: FastingLogRequest, ctx: UserContext = Depends(get_context)
+) -> dict[str, Any]:
+    """Record a fast that has already finished.
+
+    Separate from ``/start`` because this one writes a closed row: it neither
+    creates nor conflicts with an open fast, which is what makes it safe to use
+    for undoing a delete while a new fast happens to be running.
+    """
+    now = datetime.now(UTC)
+    started = payload.started_at
+    ended = payload.ended_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    if ended.tzinfo is None:
+        ended = ended.replace(tzinfo=UTC)
+
+    if ended < started:
+        raise AppError("That fast ends before it starts.")
+    if started > now or ended > now:
+        raise AppError("A completed fast cannot be in the future.")
+
+    row: dict[str, Any] = {
+        "user_id": ctx.user_id,
+        "started_at": started.isoformat(),
+        "ended_at": ended.isoformat(),
+        "target_hours": payload.target_hours,
+    }
+    if payload.note:
+        row["note"] = payload.note
+
+    saved = await ctx.db.insert_one("fasting_sessions", row)
+    return {"session": saved, "hours": round((ended - started).total_seconds() / 3600.0, 3)}
 
 
 @router.get("/history")

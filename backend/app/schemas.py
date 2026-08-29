@@ -281,3 +281,23 @@ class FastingStartRequest(ApiModel):
 class FastingStopRequest(ApiModel):
     ended_at: datetime | None = None
     note: str | None = Field(default=None, max_length=300)
+
+
+
+class FastingLogRequest(ApiModel):
+    """A fast that is already over, recorded after the fact.
+
+    Exists for two reasons: undoing a delete needs to put the row back exactly as
+    it was, and people routinely want to record a fast they did not think to time
+    at the start.
+    """
+
+    started_at: datetime
+    ended_at: datetime
+    target_hours: float = Field(default=16, gt=0, le=168)
+    note: str | None = Field(default=None, max_length=300)
+
+    @field_validator("target_hours")
+    @classmethod
+    def _round_logged_target(cls, v: float) -> float:
+        return round(v * 4) / 4

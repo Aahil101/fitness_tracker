@@ -164,3 +164,18 @@ export function hoursLabel(hours: number): string {
   if (minutes === 60) return `${whole + 1}h 00m`;
   return `${whole}h ${String(minutes).padStart(2, '0')}m`;
 }
+
+/**
+ * Hours as a running clock: 13.5042 becomes "13h 30m 15s".
+ *
+ * Used only for a timer the user is actually watching. Seconds on a stage
+ * boundary or a history row would be noise — nobody cares that a fast three
+ * weeks ago ran to 16h 04m 11s — so those keep hoursLabel.
+ */
+export function hmsLabel(hours: number): string {
+  const total = Math.max(0, Math.round((Number.isFinite(hours) ? hours : 0) * 3600));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+}
