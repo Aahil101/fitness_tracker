@@ -301,6 +301,51 @@ def test_ai_status_reports_missing_configuration(client: TestClient, no_ai_crede
     assert body["model"]
 
 
+def test_ai_status_reports_pool_health_without_serving_the_keys(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """The point of this endpoint is to answer "why has AI stopped?" from outside.
+
+    That means it has to say how many keys there are and how many are usable —
+    the failure it exists to explain is all five being spent — while remaining
+    something safe to open in a browser. It is behind auth, but a diagnostics
+    response is copied into chat threads and issue trackers, so a key in it does
+    not stay private for long.
+    """
+    from app.config import settings
+    from app.services import gemini, keypool
+
+    secret_one = "AQ.Ab8RN6FirstKeyNotRealAtAll000001"
+    secret_two = "AQ.Ab8RN6SecondKeyNotRealAtAll00002"
+    monkeypatch.setattr(settings, "gemini_api_key", secret_one)
+    monkeypatch.setattr(settings, "gemini_api_keys", secret_two)
+    # list_models() would otherwise be a live call; the network guard blocks it,
+    # but stubbing keeps the assertion about the pool rather than about models.
+    monkeypatch.setattr(gemini, "list_models", lambda: _no_models())
+
+    pool = keypool.get_pool("gemini", settings.gemini_key_list)
+    pool.bench(pool.keys[0], "quota reached", 3600)
+
+    response = client.get("/api/ai/status")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["gemini_configured"] is True
+    assert body["gemini_keys"] == 2
+    gemini_pool = next(p for p in body["key_pools"] if p["provider"] == "gemini")
+    assert gemini_pool["keys"] == 2
+    assert gemini_pool["available"] == 1, "one benched, one ready"
+
+    raw = response.text
+    for secret in (secret_one, secret_two):
+        assert secret not in raw
+        assert secret[6:-6] not in raw, "not even the middle of a key"
+
+
+async def _no_models() -> list[str]:
+    return []
+
+
 def test_photo_endpoint_explains_the_missing_key_instead_of_500ing(
     client: TestClient, no_ai_credentials: None
 ):

@@ -28,7 +28,13 @@ class Settings(BaseSettings):
 
     # --- Gemini -------------------------------------------------------------
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
+    #: Additional keys, comma separated. Tried in turn when one is exhausted,
+    #: revoked, or has lost access to the model — see services/keypool.py.
+    gemini_api_keys: str = Field(default="", alias="GEMINI_API_KEYS")
+    #: gemini-2.5-flash is no longer served to projects created recently: a new
+    #: key gets "no longer available to new users" while an older key on the same
+    #: model succeeds. 3.5-flash is available to both, so the pool stays uniform.
+    gemini_model: str = Field(default="gemini-3.5-flash", alias="GEMINI_MODEL")
     gemini_api_base: str = Field(
         default="https://generativelanguage.googleapis.com/v1beta",
         alias="GEMINI_API_BASE",
@@ -60,6 +66,7 @@ class Settings(BaseSettings):
     # Groq backs the text-only AI paths when Gemini's daily free-tier allowance
     # runs out. No vision models are published, so photos stay on Gemini.
     groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
+    groq_api_keys: str = Field(default="", alias="GROQ_API_KEYS")
     groq_api_base: str = Field(default="https://api.groq.com/openai/v1", alias="GROQ_API_BASE")
     groq_model: str = Field(default="openai/gpt-oss-120b", alias="GROQ_MODEL")
     max_upload_bytes: int = Field(default=8 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
@@ -77,13 +84,34 @@ class Settings(BaseSettings):
     def supabase_configured(self) -> bool:
         return bool(self.supabase_url and self.supabase_anon_key)
 
+    @staticmethod
+    def _split_keys(primary: str, extra: str) -> list[str]:
+        """Primary key first, then the comma-separated extras, de-duplicated."""
+        values = [primary, *extra.replace("\n", ",").split(",")]
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for value in values:
+            cleaned = value.strip()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                ordered.append(cleaned)
+        return ordered
+
+    @property
+    def gemini_key_list(self) -> list[str]:
+        return self._split_keys(self.gemini_api_key, self.gemini_api_keys)
+
+    @property
+    def groq_key_list(self) -> list[str]:
+        return self._split_keys(self.groq_api_key, self.groq_api_keys)
+
     @property
     def gemini_configured(self) -> bool:
-        return bool(self.gemini_api_key)
+        return bool(self.gemini_key_list)
 
     @property
     def groq_configured(self) -> bool:
-        return bool(self.groq_api_key)
+        return bool(self.groq_key_list)
 
     @property
     def redis_configured(self) -> bool:

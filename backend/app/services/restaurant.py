@@ -37,10 +37,13 @@ from typing import Any
 from ..config import settings
 from ..errors import UpstreamError
 from ..http import get_http_client
+from . import keypool
+from .keypool import get_pool
 
 log = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-2.5-flash"
+#: Grounding needs a model the whole pool can reach; see config.gemini_model.
+GEMINI_MODEL = "gemini-3.5-flash"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 #: Grounded answers spend tokens on retrieved pages, so the budget is generous.
@@ -369,7 +372,7 @@ async def lookup_published(description: str, chain: str) -> BrandedFood | None:
     for a named product is worse than falling back to a generic food, because the
     brand name makes it look authoritative.
     """
-    if not settings.gemini_api_key:
+    if not settings.gemini_configured:
         return None
 
     body = {
@@ -385,23 +388,48 @@ async def lookup_published(description: str, chain: str) -> BrandedFood | None:
         "generationConfig": {"temperature": 0.1, "maxOutputTokens": MAX_OUTPUT_TOKENS},
     }
 
+    # Grounded lookups are the most quota-hungry call the app makes, so they walk
+    # the whole pool before giving up — and they share the pool with every other
+    # Gemini call, so a key benched here is not retried by the coach a second
+    # later, and one benched there is skipped here.
+    pool = get_pool("gemini", settings.gemini_key_list)
     client = get_http_client()
-    try:
-        response = await client.post(
-            f"{GEMINI_URL}/{GEMINI_MODEL}:generateContent",
-            params={"key": settings.gemini_api_key},
-            json=body,
-            timeout=REQUEST_TIMEOUT_S,
+    response = None
+    for key in pool.healthy():
+        try:
+            attempt = await client.post(
+                f"{GEMINI_URL}/{GEMINI_MODEL}:generateContent",
+                # The key goes in a header, not the query string. As a query
+                # parameter it was written verbatim into the logs, because httpx
+                # logs the full URL of every request at INFO — so each grounded
+                # lookup published a live credential to the Render log.
+                headers={"x-goog-api-key": key.value},
+                json=body,
+                timeout=REQUEST_TIMEOUT_S,
+            )
+        except Exception as exc:  # network, timeout
+            log.info("Grounded brand lookup failed for %r: %s", description, exc)
+            pool.bench(key, "unreachable", keypool.TRANSIENT_COOLDOWN_S)
+            continue
+        if attempt.status_code < 400:
+            pool.note_success(key)
+            response = attempt
+            break
+        verdict = keypool.classify(attempt.status_code, attempt.text[:200])
+        log.info(
+            "Grounded lookup got %s on one key for %r; %s",
+            attempt.status_code,
+            description,
+            "trying the next" if verdict else "the request itself was refused",
         )
-    except Exception as exc:  # network, timeout
-        log.info("Grounded brand lookup failed for %r: %s", description, exc)
-        return None
+        if verdict is None:
+            # Same request, same refusal on every key — spending the pool on it
+            # only delays the fallback to a generic food.
+            break
+        pool.bench(key, verdict[0], verdict[1])
 
-    if response.status_code == 429:
+    if response is None:
         raise UpstreamError("Nutrition lookup limit reached for today. Try again tomorrow.")
-    if response.status_code >= 400:
-        log.info("Grounded brand lookup returned %s for %r", response.status_code, description)
-        return None
 
     payload = response.json()
     candidate = (payload.get("candidates") or [{}])[0]

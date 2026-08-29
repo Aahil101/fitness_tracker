@@ -12,10 +12,12 @@ from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from app import deps, security
+from app import http as app_http
 from app.main import app
 from app.security import CurrentUser
 
@@ -198,23 +200,86 @@ class FakeREST:
         return None
 
 
+#: Provider credentials every test starts without. Listed rather than derived so
+#: that adding a new provider to config.py fails here loudly instead of silently
+#: opening a hole back to the live API.
+_CREDENTIAL_FIELDS = (
+    "gemini_api_key",
+    "gemini_api_keys",
+    "groq_api_key",
+    "groq_api_keys",
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """No test inherits the developer's real API keys.
+
+    This is not tidiness. Before it existed the suite read backend/.env, found
+    five live Gemini keys, and spent real quota on them: a full run logged a
+    string of 429s against production credentials, and the resulting sockets —
+    opened on one test's event loop and closed on another's — took an unrelated
+    test down in teardown. Tests also asserted single-key behaviour ("a 403 is
+    not retried, so exactly one request") and saw five, one per key in the pool.
+
+    So credentials are absent by default and a test that wants one sets it
+    itself. Autouse fixtures are set up first, so a test's own monkeypatching
+    still wins.
+
+    The key pool is reset too. It caches health per provider in a module global
+    on purpose — a benched key must stay benched across requests — which between
+    tests means one test's exhausted keys change what the next one observes.
+    """
+    from app.config import settings
+    from app.services import keypool
+
+    for field in _CREDENTIAL_FIELDS:
+        assert hasattr(settings, field), f"{field} no longer exists on Settings"
+        monkeypatch.setattr(settings, field, "")
+
+    keypool._POOLS.clear()
+    yield
+    keypool._POOLS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_live_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any unscripted outbound request fails the test instead of leaving the machine.
+
+    Clearing credentials stops the AI calls, but USDA has a public DEMO_KEY and
+    CoFID lookups fall through to it, so the suite could still reach out. A test
+    that means to exercise a request installs its own transport, which replaces
+    this one; anything else names the URL it tried to fetch and fails.
+    """
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(
+            f"Test made a live {request.method} to {request.url.host}{request.url.path}. "
+            "Script a transport for it, or stub the service."
+        )
+
+    monkeypatch.setattr(
+        app_http, "_client", httpx.AsyncClient(transport=httpx.MockTransport(refuse))
+    )
+
+
 @pytest.fixture
-def no_ai_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force the AI-unconfigured state for degradation tests.
+def no_ai_credentials() -> None:
+    """Explicitly assert the AI-unconfigured state for degradation tests.
 
-    Without this the tests inherit whatever is in backend/.env: on a machine
-    with a real GEMINI_API_KEY they would assert the wrong branch *and* spend
-    live quota on every run. Degradation is a behaviour we choose to test, so
-    the configuration is set explicitly rather than inherited.
+    Kept as a name a test can ask for even though :func:`_no_inherited_credentials`
+    now clears the same settings for everything. Degradation is a behaviour these
+    tests exist to check, and reading `no_ai_credentials` at the top of one says
+    that; relying on a suite-wide default would leave the test looking like it
+    passes by accident.
 
-    Both providers are cleared. Leaving Groq configured would send the request
-    down the fallback path instead of degrading, which is the opposite of what
-    these tests exist to check.
+    Both providers must be clear. Leaving Groq configured sends the request down
+    the fallback path instead of degrading.
     """
     from app.config import settings
 
-    monkeypatch.setattr(settings, "gemini_api_key", "")
-    monkeypatch.setattr(settings, "groq_api_key", "")
+    assert not settings.gemini_configured, "gemini must be unconfigured here"
+    assert not settings.groq_configured, "groq must be unconfigured here"
 
 
 @pytest.fixture

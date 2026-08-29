@@ -22,7 +22,17 @@ from ..schemas import (
     InsightRequest,
     RecognisedFood,
 )
-from ..services import aggregate, cofid, gemini, insights, resolve, restaurant, text_ai, usda
+from ..services import (
+    aggregate,
+    cofid,
+    gemini,
+    insights,
+    keypool,
+    resolve,
+    restaurant,
+    text_ai,
+    usda,
+)
 from ..services.forecast import forecast as run_forecast
 from .food import ensure_food_item
 
@@ -57,6 +67,12 @@ async def ai_status() -> dict[str, Any]:
         "available_models": [m for m in models if "flash" in m or "pro" in m][:25],
         "usda_key_is_demo": settings.usda_api_key.upper() == "DEMO_KEY",
         "redis_configured": settings.redis_configured,
+        # How many keys each provider has and how many are currently usable.
+        # Identifies keys by their first and last few characters only, never in
+        # full, so this stays safe to look at.
+        "gemini_keys": len(settings.gemini_key_list),
+        "groq_keys": len(settings.groq_key_list),
+        "key_pools": keypool.all_status(),
     }
 
 

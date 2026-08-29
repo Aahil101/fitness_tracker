@@ -24,6 +24,8 @@ import httpx
 from ..config import settings
 from ..errors import ConfigurationError, UpstreamError
 from ..http import get_http_client
+from . import keypool
+from .keypool import get_pool
 
 log = logging.getLogger(__name__)
 
@@ -177,14 +179,51 @@ def _extract_text(payload: dict[str, Any]) -> str:
 
 
 async def _post(body: dict[str, Any], *, model: str) -> dict[str, Any]:
+    """Call Gemini, moving to the next key when one is exhausted or refused.
+
+    A single key made every AI feature depend on one credential staying healthy,
+    which on a free tier it does not: twenty calls a day, and a model can be
+    withdrawn from one project while still serving another. Failures that a
+    different key could survive now move on to one; failures caused by the request
+    itself are raised immediately, because retrying those just burns the pool.
+    """
     if not settings.gemini_configured:
         raise ConfigurationError(
             "GEMINI_API_KEY is not set. Add it to the backend environment to enable AI features."
         )
 
+    pool = get_pool("gemini", settings.gemini_key_list)
+    last_error: Exception | None = None
+
+    for key in pool.healthy():
+        try:
+            payload = await _post_with_key(body, model=model, api_key=key.value)
+        except UpstreamError as exc:
+            verdict = keypool.classify(getattr(exc, "status_code", None), str(exc))
+            if verdict is None:
+                raise
+            pool.bench(key, verdict[0], verdict[1])
+            last_error = exc
+            continue
+        pool.note_success(key)
+        return payload
+
+    if last_error is not None:
+        raise last_error
+    raise UpstreamError("No Gemini key is currently usable.")
+
+
+def _upstream(status_code: int, message: str) -> UpstreamError:
+    """An UpstreamError that remembers the HTTP status, so the pool can classify it."""
+    error = UpstreamError(message)
+    error.status_code = status_code  # type: ignore[attr-defined]
+    return error
+
+
+async def _post_with_key(body: dict[str, Any], *, model: str, api_key: str) -> dict[str, Any]:
     client = get_http_client()
     url = _endpoint(model)
-    headers = {"x-goog-api-key": settings.gemini_api_key, "Content-Type": "application/json"}
+    headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
 
     last_transient = 0
     for attempt in range(MAX_ATTEMPTS):
@@ -228,26 +267,30 @@ async def _post(body: dict[str, Any], *, model: str) -> dict[str, Any]:
 
         log.error("Gemini %s error: %s", resp.status_code, detail)
         if resp.status_code == 429:
-            raise UpstreamError("Gemini free-tier quota reached. Try again in a minute.")
+            raise _upstream(resp.status_code, "Gemini free-tier quota reached. Try again in a minute.")
         if resp.status_code in (401, 403):
-            raise UpstreamError("Gemini rejected the API key.")
+            raise _upstream(resp.status_code, "Gemini rejected the API key.")
         if resp.status_code == 404:
-            raise UpstreamError(
-                f"Gemini model '{model}' is not available for this key. "
-                "Set GEMINI_MODEL to a model your key can access."
+            # Often project-specific rather than wrong: a model withdrawn for new
+            # projects still answers for older ones, so another key may succeed.
+            raise _upstream(
+                resp.status_code,
+                f"Gemini model '{model}' is not available for this key: {detail[:160]}",
             )
         if resp.status_code in TRANSIENT_STATUSES:
-            raise UpstreamError(
+            raise _upstream(
+                resp.status_code,
                 "Gemini is overloaded right now. Wait a few seconds and try again — "
-                "or enter the food manually."
+                "or enter the food manually.",
             )
-        raise UpstreamError(f"Gemini error {resp.status_code}: {detail}")
+        raise _upstream(resp.status_code, f"Gemini error {resp.status_code}: {detail}")
 
-    raise UpstreamError(
+    raise _upstream(
+        last_transient or 503,
         f"Gemini stayed overloaded ({last_transient}) after {MAX_ATTEMPTS} attempts. "
         "Wait a few seconds and try again — or enter the food manually."
         if last_transient
-        else "Gemini request failed after retry."
+        else "Gemini request failed after retry.",
     )
 
 

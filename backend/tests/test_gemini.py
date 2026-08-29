@@ -20,11 +20,15 @@ from app.services import gemini
 def mock_gemini(monkeypatch: pytest.MonkeyPatch):
     """Swap the shared httpx client for a scripted transport, recording requests.
 
-    A fake key is set explicitly. Inheriting one from backend/.env made these
-    tests pass locally and fail in CI, where no key exists and _post bails out
-    with ConfigurationError before the transport is ever reached.
+    Exactly one fake key is set. Two reasons it is explicit. Inheriting one from
+    backend/.env made these tests pass locally and fail in CI, where no key
+    exists and _post bails out with ConfigurationError before the transport is
+    ever reached. And the count of requests is what several of these tests
+    assert: _post now walks a pool of keys, so a five-key pool turns "a 403 is
+    not retried, so one request" into five.
     """
     monkeypatch.setattr(settings, "gemini_api_key", "test-key-not-a-real-one")
+    monkeypatch.setattr(settings, "gemini_api_keys", "")
 
     def install(handler):
         seen: list[httpx.Request] = []

@@ -152,18 +152,19 @@ def test_a_serving_converts_to_per_100g_without_losing_the_published_figure() ->
 
 
 def test_a_lookup_with_no_credentials_declines_rather_than_guesses() -> None:
-    """A fabricated figure under a brand name looks authoritative and is not."""
+    """A fabricated figure under a brand name looks authoritative and is not.
+
+    The credentials are already absent — conftest clears them for every test —
+    so this asserts that state rather than setting it. It used to assign to the
+    global settings object and restore it in a finally, which put the real key
+    back mid-suite and sent this very call to the live API.
+    """
     import asyncio
 
     from app.config import settings
 
-    original = settings.gemini_api_key
-    try:
-        settings.gemini_api_key = ""
-        result = asyncio.run(restaurant.lookup_published("dominos farmhouse", "Domino's"))
-        assert result is None
-    finally:
-        settings.gemini_api_key = original
+    assert not settings.gemini_configured
+    assert asyncio.run(restaurant.lookup_published("dominos farmhouse", "Domino's")) is None
 
 
 class TestGroundedReplyParsing:

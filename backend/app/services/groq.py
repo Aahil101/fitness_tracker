@@ -26,7 +26,9 @@ import httpx
 from ..config import settings
 from ..errors import ConfigurationError, UpstreamError
 from ..http import get_http_client
+from . import keypool
 from .gemini import ASSISTANT_SYSTEM_PROMPT, MEAL_TEXT_PROMPT
+from .keypool import get_pool
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +54,46 @@ async def _chat_completion(
     if not settings.groq_configured:
         raise ConfigurationError("GROQ_API_KEY is not set.")
 
+    pool = get_pool("groq", settings.groq_key_list)
+    last_error: Exception | None = None
+    for key in pool.healthy():
+        try:
+            content = await _chat_with_key(
+                messages,
+                json_mode=json_mode,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                api_key=key.value,
+            )
+        except UpstreamError as exc:
+            verdict = keypool.classify(getattr(exc, "status_code", None), str(exc))
+            if verdict is None:
+                raise
+            pool.bench(key, verdict[0], verdict[1])
+            last_error = exc
+            continue
+        pool.note_success(key)
+        return content
+
+    if last_error is not None:
+        raise last_error
+    raise UpstreamError("No Groq key is currently usable.")
+
+
+def _upstream(status_code: int, message: str) -> UpstreamError:
+    error = UpstreamError(message)
+    error.status_code = status_code  # type: ignore[attr-defined]
+    return error
+
+
+async def _chat_with_key(
+    messages: list[dict[str, str]],
+    *,
+    json_mode: bool,
+    temperature: float,
+    max_tokens: int,
+    api_key: str,
+) -> str:
     body: dict[str, Any] = {
         "model": settings.groq_model,
         "messages": messages,
@@ -66,7 +108,13 @@ async def _chat_completion(
         resp = await client.post(
             f"{settings.groq_api_base}/chat/completions",
             json=body,
-            headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                # Groq sits behind Cloudflare, which answers a request with no
+                # User-Agent with a 403 and Cloudflare error 1010 — nothing to do
+                # with the key, but indistinguishable from a rejected one.
+                "User-Agent": "PulseFitness/1.0",
+            },
             timeout=settings.gemini_timeout_s,
         )
     except httpx.HTTPError as exc:
@@ -76,10 +124,13 @@ async def _chat_completion(
         detail = resp.text[:300]
         log.error("Groq %s error: %s", resp.status_code, detail)
         if resp.status_code == 429:
-            raise UpstreamError("Groq rate limit reached. Try again in a moment.")
+            raise _upstream(resp.status_code, "Groq rate limit reached. Try again in a moment.")
         if resp.status_code in (401, 403):
-            raise UpstreamError("Groq rejected the API key.")
-        raise UpstreamError(f"Groq error {resp.status_code}.")
+            raise _upstream(resp.status_code, "Groq rejected the API key.")
+        if resp.status_code == 404:
+            # The model is not enabled for this key; another key may have it.
+            raise _upstream(resp.status_code, f"Groq model unavailable: {detail[:150]}")
+        raise _upstream(resp.status_code, f"Groq error {resp.status_code}.")
 
     try:
         content = resp.json()["choices"][0]["message"]["content"]
