@@ -9,7 +9,8 @@ puts your weight. Every service it depends on stays inside a free tier at this s
 - **Data / auth / storage** Supabase — Postgres, Row Level Security, Auth, private photo bucket
 - **Cache & rate limits** Upstash Redis (optional; falls back to an in-process cache)
 - **Food vision** Gemini, structured JSON output
-- **Nutrition data** USDA FoodData Central
+- **Nutrition data** a curated table of prepared foods, the UK CoFID composition dataset, the
+  chains' own published menu figures, then USDA FoodData Central behind a relevance gate
 - **Charts** Recharts
 - **Hosting** Vercel (web) + Render or Railway (API)
 
@@ -18,9 +19,27 @@ puts your weight. Every service it depends on stays inside a free tier at this s
 ## What it does
 
 **Photo food logging.** A photo goes to Gemini, which returns each food it can see with an
-estimated weight in grams and a confidence score. Each item is resolved against the shared
-`food_items` cache first, then USDA FoodData Central, and the result is scaled to the portion.
-You always get an editable draft — nothing is written to your log until you confirm it.
+estimated weight in grams and a confidence score. You always get an editable draft — nothing is
+written to your log until you confirm it.
+
+**Where a calorie figure comes from.** In descending order of how much the source can be
+trusted, and the order matters:
+
+1. **A chain's own published figures**, for a named menu item. 658 items from Domino's,
+   McDonald's, Pizza Hut and Taco Bell India, built offline by `scripts/build_chain_menus.py`
+   from what each chain publishes under FSSAI labelling rules. Exact and identical every time.
+2. **Our own curated table** of prepared foods and drinks, cross-checked against a composition
+   table. This exists because a database of *products* answers a question about home cooking
+   with the nearest packet.
+3. **CoFID**, the UK composition dataset — 2,854 foods, preparation-aware, so "chapatis, made
+   without fat" and "made with fat" are separate entries.
+4. **The `food_items` cache**, then **USDA FoodData Central**, both screened for relevance and
+   for agreeing with the model on energy density.
+5. **The model's own estimate**, labelled as an estimate.
+
+Whatever survives passes a plausibility floor that does not depend on any source being right: a
+drink described as containing milk and sugar cannot come out near zero however confidently a
+database says so. That case is not hypothetical — it is why the pipeline looks like this.
 
 **Deficit tracking.** Maintenance calories come from Mifflin-St Jeor plus an activity
 multiplier. Your daily target is maintenance minus the daily share of your weekly goal, with a
@@ -93,8 +112,23 @@ supabase/migrations/    schema + RLS + storage policies
 | --- | --- | --- |
 | Supabase | [supabase.com/dashboard](https://supabase.com/dashboard) → new project → Settings → API | **Required** |
 | Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Required for photo logging, coach and recaps |
-| USDA FoodData Central | [fdc.nal.usda.gov/api-key-signup](https://fdc.nal.usda.gov/api-key-signup) | Required for nutrition lookup (`DEMO_KEY` works for a quick try) |
+| Groq | [console.groq.com/keys](https://console.groq.com/keys) | Optional; takes over the text-only paths when Gemini's daily allowance runs out |
+| USDA FoodData Central | [fdc.nal.usda.gov/api-key-signup](https://fdc.nal.usda.gov/api-key-signup) | Optional; the last resort behind the curated table and CoFID (`DEMO_KEY` works) |
 | Upstash Redis | [console.upstash.com](https://console.upstash.com) → database → REST API | Optional |
+
+Both providers accept several keys, comma separated, in `GEMINI_API_KEYS` and `GROQ_API_KEYS`.
+A call takes a healthy key and moves to the next when one is exhausted or refused, which stops
+one credential taking every AI feature down. `GET /api/ai/status` reports how many keys each
+provider has and how many are currently usable, identifying them by a few characters only.
+
+Pooling free-tier keys to get past a daily quota is against Google's terms, which are set per
+project rather than per key. Failover across keys you own is a reasonable thing to want for
+resilience; relying on it to serve customers is not a foundation that holds, and billing on one
+project costs very little at this volume.
+
+Note that Search grounding is not part of Gemini's free tier at all — every key answers a
+grounded request with `429 RESOURCE_EXHAUSTED` while answering ordinary calls normally. That is
+why the chain menus are a committed data file rather than a live lookup.
 
 The app degrades honestly without the optional ones: search and manual entry work without
 Gemini, and the cache falls back to an in-process store without Upstash.
@@ -247,7 +281,8 @@ for querying. Getting this wrong is how trackers show an empty gauge at 1 a.m.
   `/auth/v1/user` check as fallbacks).
 - Food photos live in a private bucket; policies key on the first path segment matching
   `auth.uid()`, and reads go through short-lived signed URLs.
-- The Gemini and USDA keys are server-side only.
+- The Gemini, Groq and USDA keys are server-side only, and are sent in request headers rather
+  than query strings so they cannot end up in a log line.
 - Per-user hourly rate limits on the vision, chat and recap endpoints keep a runaway loop
   inside the free tiers.
 - The coach is instructed to refuse medical advice, to never suggest under 1,200 kcal/day or
@@ -281,3 +316,42 @@ Renders the real `HomeGauge`, all six gauge colour states and the MD3 primitives
 against fixture data, so layouts can be reviewed at any viewport without a
 Supabase session. It is only built when `BUILD_PREVIEW=1`, so it never ships to
 production.
+
+
+---
+
+## Known limits
+
+Measured, not assumed. The figure below each item is the spread across three
+identical requests to production, which is what a user notices: a number that
+moves between the same two entries cannot be trusted even when its average is
+right.
+
+**Fixed and exact.** Named chain items and anything in the curated table log the
+same figure every time — a Domino's Margherita is 688 kcal, a McAloo Tikki 340,
+a cup of milky sweet tea 91. 0% spread.
+
+**Varies, because the description is decomposed by a model.** For a dish with no
+reference data the calories are stable but the *breakdown* is not: "one plate
+misal pav" came back at 629, 579 and 589 kcal on three identical requests, and
+"a glass of sol kadhi" at 84, 175 and 72. The remaining variance is the model
+deciding differently how many things a description contains and how big each one
+is, not the pricing of what it decided. Caching the parse against the input text
+would fix it and has not been done.
+
+**Compound dishes the table holds one component of are declined, not guessed.**
+Pricing vada pav as the fritter alone under-counted it by the bread; dal makhani
+as plain boiled dal under-counted a dish finished with cream and butter. Both now
+fall through to an estimate that says it is one, because the butter is most of
+the difference and varies by kitchen. Each belongs in the table the moment there
+is a figure worth trusting.
+
+**Weights for Domino's are derived, not published.** Domino's publishes energy
+and no weights. The portion shown is worked out from the energy using the density
+of the 76 Pizza Hut pizzas that do publish weights, which recovers those same 76
+to within 6% at the median. The calories are exactly as published; the note on
+the entry says the weight is not.
+
+**Not addressed.** No error monitoring. The API runs on a free plan that sleeps
+after ~15 minutes idle, so the first request after that is slow. Rate limits live
+in memory unless Upstash is configured, so they reset on deploy.
